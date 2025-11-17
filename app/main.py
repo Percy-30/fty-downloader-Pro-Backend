@@ -1,6 +1,4 @@
-# ====================================================================
 # app/main.py
-# ====================================================================
 import logging
 import asyncio
 from pathlib import Path
@@ -16,14 +14,16 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.limits import limiter
 
 from app.config import settings
-from app.routes.video_routes import router as video_router
-#from app.routes import audio_routes
+from app.routes.download_routes import router as download_router
+from app.routes.youtube_routes import router as youtube_router
 from app.routes.audio_routes import router as audio_router
 from app.routes.cookies_routes import router as cookies_router
-from app.routes.download_routes import router as download_router
+from app.routes.combiner_routes import router as combiner_router
+from app.routes.facebook_routes import router as facebook_router  # ✅ NUEVO: Facebook routes
 from app.services.base_extractor import SnapTubeError
 from app.services.youtube_cookie_updater import login_youtube_and_save_cookies
-from app.cookies.check_cookies import cookies_are_valid  # Adaptado al formato Netscape
+from app.cookies.check_cookies import cookies_are_valid
+
 
 # ==========================================================
 # LOGGING CONFIG
@@ -43,7 +43,6 @@ def ensure_valid_cookies(force: bool = False) -> bool:
     """Verifica y actualiza cookies si es necesario."""
     global _last_cookie_update_attempt
 
-    # Evita intentos demasiado seguidos (1 min de espera mínimo)
     if not force and _last_cookie_update_attempt and (datetime.now() - _last_cookie_update_attempt).seconds < 60:
         logger.warning("⏳ Último intento de actualización de cookies fue hace menos de 1 min. Saltando...")
         return False
@@ -66,7 +65,7 @@ def ensure_valid_cookies(force: bool = False) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup & Shutdown"""
-    logger.info("🚀 SnapNosh API starting up...")
+    logger.info("🚀 FreeDownloaderPro API starting up...")
 
     # Crear directorios necesarios
     settings.TEMP_DIR.mkdir(exist_ok=True)
@@ -80,12 +79,16 @@ async def lifespan(app: FastAPI):
     # Tarea en segundo plano para limpieza
     cleanup_task = asyncio.create_task(periodic_cleanup())
 
-    logger.info("✅ SnapNosh API ready!")
+    logger.info("✅ FreeDownloaderPro API ready!")
     yield
 
-    logger.info("🛑 SnapNosh API shutting down...")
+    logger.info("🛑 FreeDownloaderPro API shutting down...")
     cleanup_task.cancel()
     await cleanup_temp_files()
+    
+    # Limpiar archivos temporales del combiner
+    await cleanup_combiner_temp_files()
+    
     logger.info("👋 Shutdown complete")
 
 # ==========================================================
@@ -113,52 +116,103 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
-#app.include_router(video_router, prefix="/api/v1", tags=["video"])
-#app.include_router(cookies_router, prefix="/api/v1", tags=["cookies"])
-#app.include_router(download_router, prefix="/api/v1", tags=["download"])
-#app.include_router(video_router) #cookies_routes
-app.include_router(video_router)
-app.include_router(cookies_router, prefix="/api") 
-app.include_router(download_router, prefix="/api/v1")
-app.include_router(audio_router)
-app.include_router(audio_router, prefix="/api/v1")
 # ==========================================================
-# ROOT
+# ROUTERS CONFIGURATION - ESTRUCTURA COMPATIBLE CON FRONTEND
+# ==========================================================
+app.include_router(download_router, prefix="/api/v1", tags=["download"])
+app.include_router(audio_router, prefix="/api/v1", tags=["audio"])
+app.include_router(cookies_router, prefix="/api/v1", tags=["cookies"])
+app.include_router(combiner_router, prefix="/api/v1", tags=["combiner"])
+app.include_router(youtube_router, prefix="/api/v1/youtube", tags=["youtube"])  # ✅ YouTube routes específicas
+app.include_router(facebook_router, prefix="/api/v1/facebook", tags=["facebook"])  # ✅ NUEVO: Facebook routes
+
+# ==========================================================
+# ROOT ENDPOINT
 # ==========================================================
 @app.get("/", response_class=JSONResponse)
 async def root():
-    """API Status"""
+    """API Status - Compatible con frontend"""
     return {
         "name": settings.API_TITLE,
         "version": settings.API_VERSION,
         "status": "operational",
-        "documentation": "/docs" if settings.DEBUG else "Contact administrator",
+        "description": "API para descarga de videos de redes sociales",
         "endpoints": {
-            "extract": "/api/v1/extract",
-            "download": "/api/v1/download",
-            "stream": "/api/v1/stream",
-            "audio": "/api/v1/audio",
-            "platforms": "/api/v1/platforms"
+            "youtube": {
+                "info": "POST /api/v1/youtube/download",
+                "combined": "POST /api/v1/combiner/youtube/combine",
+                "formats": "GET /api/v1/combiner/youtube/formats"
+            },
+            "tiktok": {
+                "info": "POST /api/v1/tiktok/download",
+                "audio": "POST /api/v1/tiktok/audio"
+            },
+            "facebook": {
+                "info": "POST /api/v1/facebook/info",
+                "video": "POST /api/v1/facebook/video", 
+                "audio": "POST /api/v1/facebook/audio"
+            },
+            "audio": "GET /api/v1/audio",
+            "health": "GET /api/v1/health",
+            "cookies": "GET /api/v1/cookies/check"
         }
     }
 
 # ==========================================================
-# COOKIES CHECK
+# HEALTH CHECK
 # ==========================================================
-@app.get("/check-cookies")
-async def check_cookies():
-    path = Path(settings.YOUTUBE_COOKIES_PATH)
-    return {"exists": path.exists(), "path": str(path.resolve())}
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "FreeDownloaderPro API",
+        "version": settings.API_VERSION,
+        "timestamp": datetime.now().isoformat(),
+        "features": {
+            "youtube_download": True,
+            "tiktok_download": True,
+            "facebook_download": True,
+            "audio_extraction": True,
+            "video_audio_combiner": True,
+            "cookies_management": True
+        },
+        "routes_available": {
+            "youtube": [
+                "POST /api/v1/youtube/download",
+                "POST /api/v1/combiner/youtube/combine",
+                "GET /api/v1/combiner/youtube/formats"
+            ],
+            "tiktok": [
+                "POST /api/v1/tiktok/download",
+                "POST /api/v1/tiktok/audio"
+            ],
+            "facebook": [
+                "POST /api/v1/facebook/info",
+                "POST /api/v1/facebook/video",
+                "POST /api/v1/facebook/audio"
+            ],
+            "general": [
+                "GET /api/v1/audio",
+                "GET /api/v1/health",
+                "GET /api/v1/cookies/check"
+            ]
+        }
+    }
 
-@app.get("/debug/cookies")
-async def debug_cookies():
-    path = settings.YOUTUBE_COOKIES_PATH
-    if path.exists():
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read(500)
-        return {"path": str(path), "content_preview": content}
-    return {"error": "Archivo no encontrado", "path": str(path)}
+# ==========================================================
+# COOKIES CHECK ENDPOINTS
+# ==========================================================
+@app.get("/api/v1/cookies/check")
+async def check_cookies():
+    """Verificar estado de cookies"""
+    path = Path(settings.YOUTUBE_COOKIES_PATH)
+    return {
+        "exists": path.exists(), 
+        "path": str(path.resolve()),
+        "valid": cookies_are_valid() if path.exists() else False,
+        "last_updated": _last_cookie_update_attempt.isoformat() if _last_cookie_update_attempt else None
+    }
 
 # ==========================================================
 # EXCEPTION HANDLERS
@@ -172,16 +226,28 @@ async def snaptube_exception_handler(request: Request, exc: SnapTubeError):
         if ensure_valid_cookies(force=True):
             return JSONResponse(
                 status_code=503,
-                content={"status": "error", "message": "Cookies actualizadas, intente nuevamente."}
+                content={
+                    "status": "error", 
+                    "message": "Cookies actualizadas, intente nuevamente.",
+                    "type": "CookiesRefreshed"
+                }
             )
         else:
             return JSONResponse(
                 status_code=500,
-                content={"status": "error", "message": "No se pudo actualizar cookies automáticamente."}
+                content={
+                    "status": "error", 
+                    "message": "No se pudo actualizar cookies automáticamente.",
+                    "type": "CookiesError"
+                }
             )
     return JSONResponse(
         status_code=400,
-        content={"status": "error", "message": str(exc), "type": "SnapTubeError"}
+        content={
+            "status": "error", 
+            "message": str(exc), 
+            "type": "SnapTubeError"
+        }
     )
 
 @app.exception_handler(RateLimitExceeded)
@@ -192,7 +258,8 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
         content={
             "status": "error",
             "message": f"Rate limit exceeded: {exc.detail}",
-            "type": "RateLimitError"
+            "type": "RateLimitError",
+            "retry_after": "60 seconds"
         }
     )
 
@@ -204,7 +271,28 @@ async def not_found_handler(request: Request, exc):
         content={
             "status": "error",
             "message": "Endpoint not found",
-            "available_endpoints": ["/api/v1/extract", "/api/v1/download", "/api/v1/stream", "/api/v1/audio"]
+            "available_endpoints": {
+                "youtube": [
+                    "POST /api/v1/youtube/download",
+                    "POST /api/v1/combiner/youtube/combine",
+                    "GET /api/v1/combiner/youtube/formats"
+                ],
+                "tiktok": [
+                    "POST /api/v1/tiktok/download",
+                    "POST /api/v1/tiktok/audio"
+                ],
+                "facebook": [
+                    "POST /api/v1/facebook/info",
+                    "POST /api/v1/facebook/video",
+                    "POST /api/v1/facebook/audio"
+                ],
+                "general": [
+                    "GET /api/v1/audio",
+                    "GET /api/v1/health",
+                    "GET /api/v1/cookies/check",
+                    "GET /"
+                ]
+            }
         }
     )
 
@@ -214,7 +302,12 @@ async def internal_error_handler(request: Request, exc):
     logger.error(f"Internal server error: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"status": "error", "message": "Internal server error", "type": "InternalError"}
+        content={
+            "status": "error", 
+            "message": "Internal server error", 
+            "type": "InternalError",
+            "support": "Contact support if this persists"
+        }
     )
 
 # ==========================================================
@@ -225,32 +318,122 @@ async def periodic_cleanup():
     while True:
         try:
             await cleanup_temp_files()
+            await cleanup_combiner_temp_files()
             await asyncio.sleep(1800)  # 30 min
         except Exception as e:
             logger.error(f"💥 Periodic cleanup error: {str(e)}")
-            await asyncio.sleep(3600)
+            await asyncio.sleep(3600)  # Esperar 1 hora si hay error
 
 async def cleanup_temp_files():
     """Remove old temporary files"""
     try:
-        current_time = asyncio.get_event_loop().time()
+        import time
+        current_time = time.time()
         cleaned = 0
         for filepath in settings.TEMP_DIR.glob("*"):
             if filepath.is_file():
                 file_age = current_time - filepath.stat().st_mtime
                 if file_age > settings.CLEANUP_INTERVAL:
-                    filepath.unlink()
-                    cleaned += 1
+                    try:
+                        filepath.unlink()
+                        cleaned += 1
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not delete {filepath}: {e}")
         if cleaned > 0:
             logger.info(f"🗑️ Cleaned {cleaned} temporary files")
     except Exception as e:
         logger.error(f"⚠️ Cleanup error: {str(e)}")
 
+async def cleanup_combiner_temp_files():
+    """Remove old combiner temporary files"""
+    try:
+        import shutil
+        import tempfile
+        import os
+        import time
+        
+        current_time = time.time()
+        temp_dir = tempfile.gettempdir()
+        cleaned_dirs = 0
+        cleaned_files = 0
+        
+        # Limpiar directorios temporales que empiecen con "yt_combiner_"
+        for item in os.listdir(temp_dir):
+            item_path = os.path.join(temp_dir, item)
+            try:
+                if item.startswith("yt_combiner_") and os.path.isdir(item_path):
+                    # Verificar antigüedad del directorio
+                    dir_age = current_time - os.path.getmtime(item_path)
+                    if dir_age > settings.CLEANUP_INTERVAL:  # 1 hora
+                        shutil.rmtree(item_path, ignore_errors=True)
+                        cleaned_dirs += 1
+                        logger.debug(f"🧹 Cleaned combiner temp directory: {item}")
+                
+                # También limpiar archivos temporales de combiner
+                elif item.startswith("combined_") and (item.endswith(".mp4") or item.endswith(".webm")):
+                    file_age = current_time - os.path.getmtime(item_path)
+                    if file_age > settings.CLEANUP_INTERVAL:
+                        os.unlink(item_path)
+                        cleaned_files += 1
+                        logger.debug(f"🧹 Cleaned combiner temp file: {item}")
+                        
+            except Exception as e:
+                logger.warning(f"⚠️ Could not clean temp item {item}: {e}")
+        
+        if cleaned_dirs > 0 or cleaned_files > 0:
+            logger.info(f"🧹 Cleaned {cleaned_dirs} combiner directories and {cleaned_files} files")
+            
+    except Exception as e:
+        logger.error(f"⚠️ Combiner cleanup error: {str(e)}")
+
+# ==========================================================
+# API STATUS ENDPOINT
+# ==========================================================
+@app.get("/api/v1/status")
+async def api_status():
+    """Detailed API status information"""
+    from app.services.facebook_service import FacebookExtractor
+    from app.services.tiktok_service import TikTokService
+    
+    services_status = {
+        "youtube": {
+            "status": "operational",
+            "cookies_valid": cookies_are_valid(),
+            "extractor": "yt-dlp"
+        },
+        "facebook": {
+            "status": "operational", 
+            "extractor": "FacebookExtractor",
+            "methods": ["yt-dlp", "manual_scraping", "mobile_fallback"]
+        },
+        "tiktok": {
+            "status": "operational",
+            "extractor": "TikTokService", 
+            "methods": ["oembed", "embed_scraping"]
+        },
+        "combiner": {
+            "status": "operational",
+            "service": "YouTubeCombinerService"
+        }
+    }
+    
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": settings.API_VERSION,
+        "services": services_status,
+        "environment": "production" if not settings.DEBUG else "development",
+        "rate_limiting": {
+            "enabled": True,
+            "strategy": "fixed_window"
+        }
+    }
+
 # ==========================================================
 # MAIN ENTRY
 # ==========================================================
 if __name__ == "__main__":
-    logger.info("🚀 Iniciando SnapTube-Like API...")
+    logger.info("🚀 Iniciando FreeDownloaderPro API...")
     import uvicorn
     uvicorn.run(
         "app.main:app",
@@ -258,5 +441,6 @@ if __name__ == "__main__":
         port=settings.PORT,
         reload=settings.DEBUG,
         access_log=True,
-        log_level=settings.LOG_LEVEL.lower()
+        log_level=settings.LOG_LEVEL.lower(),
+        workers=1
     )

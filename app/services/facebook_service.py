@@ -1,5 +1,5 @@
 # ====================================================================
-# app/services/facebook_service.py
+# app/services/facebook_service.py - VERSIÓN ACTUALIZADA
 # ====================================================================
 import asyncio
 import logging
@@ -7,7 +7,7 @@ import os
 import re
 import json
 import tempfile
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import yt_dlp
 import requests
@@ -34,7 +34,7 @@ FACEBOOK_MOBILE_HEADERS = {
 
 
 class FacebookExtractor(BaseExtractor):
-    """Extractor de videos de Facebook actualizado y funcional."""
+    """Extractor de videos de Facebook actualizado con lógica de yt-dlp directo."""
 
     @property
     def platform(self) -> str:
@@ -46,13 +46,107 @@ class FacebookExtractor(BaseExtractor):
     async def extract(
         self, url: str, mobile: bool = False, cookies: Optional[str] = None, **kwargs
     ) -> Dict[str, Any]:
-        """Extrae video completo de Facebook con fallback manual y soporte de cookies."""
+        """Extrae información completa del video de Facebook usando yt-dlp (como en Node.js)."""
         self.validator.validate_url(url)
-        self._cookies = cookies
+        
+        try:
+            logger.info(f"📥 Procesando Facebook URL: {url}")
+            
+            # Usar yt-dlp como método principal (igual que en Node.js)
+            result = await self._extract_with_ytdlp(url, cookies)
+            
+            if result and result.get("status") == "success":
+                logger.info("✅ Facebook extraction successful with yt-dlp")
+                return result
+            
+            # Fallback a métodos manuales si yt-dlp falla
+            logger.warning("yt-dlp falló, intentando métodos manuales...")
+            return await self._extract_with_fallback(url, mobile, cookies)
+            
+        except Exception as e:
+            logger.error(f"💥 Error en extracción Facebook: {str(e)}")
+            raise SnapTubeError(f"Error procesando video de Facebook: {str(e)}")
 
-        # Métodos de extracción en orden
+    async def _extract_with_ytdlp(self, url: str, cookies: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Extrae usando yt-dlp igual que en la API Node.js anterior."""
+        try:
+            ydl_opts = {
+                "dump_json": True,
+                "quiet": True,
+                "no_warnings": True,
+                "no_check_certificates": True,
+                "geo_bypass": True,
+                "extract_flat": False,
+                "http_headers": self.get_platform_headers(),
+                "socket_timeout": settings.REQUEST_TIMEOUT,
+            }
+
+            # Manejar cookies si están disponibles
+            temp_cookie_path = None
+            if cookies:
+                fd, temp_cookie_path = tempfile.mkstemp(suffix=".txt")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(cookies)
+                ydl_opts["cookiefile"] = temp_cookie_path
+
+            loop = asyncio.get_event_loop()
+            
+            def extract_sync():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+
+            info = await loop.run_in_executor(None, extract_sync)
+            
+            if not info:
+                return None
+
+            # Procesar formatos igual que en Node.js
+            formats = []
+            if info.get("formats"):
+                for format in info["formats"]:
+                    if format.get("url") and format.get("protocol") in ["http", "https"]:
+                        format_info = {
+                            "quality": format.get("format_note") or "HD",
+                            "format": format.get("ext") or "mp4",
+                            "resolution": format.get("resolution") or "1920x1080",
+                            "size": self._format_size(format.get("filesize")),
+                            "url": format["url"],
+                            "hasAudio": bool(format.get("audio_codec")),
+                            "codec": format.get("vcodec"),
+                            "hasVideo": bool(format.get("vcodec")),
+                        }
+                        formats.append(format_info)
+
+            # Construir respuesta igual que en Node.js
+            response = {
+                "status": "success",
+                "platform": "facebook",
+                "title": info.get("title") or "Video de Facebook",
+                "thumbnail": info.get("thumbnail") or "",
+                "duration": info.get("duration") or 0,
+                "width": info.get("width") or None,
+                "height": info.get("height") or None,
+                "method": "yt-dlp (Python)",
+                "formats": formats,
+                "original_url": url,
+                "uploader": info.get("uploader") or "",
+                "view_count": info.get("view_count") or 0,
+                "description": info.get("description") or ""
+            }
+
+            return response
+
+        except Exception as e:
+            logger.warning(f"yt-dlp extraction failed: {str(e)}")
+            return None
+        finally:
+            # Limpiar archivo temporal de cookies
+            if temp_cookie_path and os.path.exists(temp_cookie_path):
+                os.unlink(temp_cookie_path)
+
+    async def _extract_with_fallback(self, url: str, mobile: bool = False, cookies: Optional[str] = None) -> Dict[str, Any]:
+        """Métodos de fallback manuales."""
         methods = [
-            self._extract_ytdlp,
             self._extract_manual,
             self._extract_mobile_redirect
         ]
@@ -60,62 +154,28 @@ class FacebookExtractor(BaseExtractor):
         last_error = None
         for method in methods:
             try:
-                logger.info(f"Intentando {method.__name__} para Facebook")
+                logger.info(f"Intentando fallback: {method.__name__}")
                 result = await method(url, mobile)
                 if result and result.get("video_url"):
-                    logger.info(f"✅ Extracción exitosa con {method.__name__}")
+                    # Asegurar que el resultado tenga el formato esperado
+                    result["status"] = "success"
+                    result["platform"] = "facebook"
+                    result["method"] = f"fallback_{method.__name__}"
+                    result["formats"] = [{
+                        "quality": "HD",
+                        "format": "mp4", 
+                        "resolution": "1920x1080",
+                        "size": "Desconocido",
+                        "url": result["video_url"],
+                        "hasAudio": True,
+                        "hasVideo": True
+                    }]
                     return result
             except Exception as e:
                 last_error = e
-                logger.warning(f"❌ {method.__name__} falló: {str(e)}")
                 continue
 
         raise SnapTubeError(f"Todos los métodos fallaron. Último error: {last_error}")
-
-    async def _extract_ytdlp(self, url: str, mobile: bool = False) -> Optional[Dict[str, Any]]:
-        """Extrae usando yt-dlp, admite cookies opcionales."""
-        try:
-            headers = self.get_platform_headers(mobile)
-            ydl_opts = {
-                "quiet": True,
-                "no_warnings": True,
-                "extract_flat": False,
-                "forceurl": True,
-                "simulate": True,
-                "format": "best",
-                "http_headers": headers,
-                "extractor_args": {"facebook": {"skip_dash_manifest": True}},
-                "socket_timeout": settings.REQUEST_TIMEOUT,
-            }
-
-            temp_cookie_path = None
-            if getattr(self, "_cookies", None):
-                fd, temp_cookie_path = tempfile.mkstemp(suffix=".txt")
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(self._cookies)
-                ydl_opts["cookiefile"] = temp_cookie_path
-
-            loop = asyncio.get_event_loop()
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
-
-            if not info:
-                return None
-
-            video_url = info.get("url")
-            if not video_url and "formats" in info:
-                for f in info["formats"]:
-                    if f.get("protocol") in ("http", "https") and f.get("url"):
-                        video_url = f["url"]
-                        break
-            if not video_url:
-                return None
-
-            return self._build_response(info, method="ytdlp")
-
-        finally:
-            if temp_cookie_path and os.path.exists(temp_cookie_path):
-                os.unlink(temp_cookie_path)
 
     async def _extract_manual(self, url: str, mobile: bool = False) -> Optional[Dict[str, Any]]:
         """Fallback manual usando scraping de Facebook."""
@@ -139,27 +199,30 @@ class FacebookExtractor(BaseExtractor):
             thumbnail = self._get_thumbnail(soup)
 
             return {
-                "status": "success",
-                "platform": "facebook",
                 "title": title,
                 "thumbnail": thumbnail,
                 "video_url": video_url,
                 "duration": 0,
                 "width": None,
                 "height": None,
-                "method": "manual_extraction"
             }
 
         except Exception as e:
-            logger.warning(f"Scraping manual falló para Facebook: {str(e)}")
+            logger.warning(f"Scraping manual falló: {str(e)}")
             return None
 
     async def _extract_mobile_redirect(self, url: str, mobile: bool = True) -> Optional[Dict[str, Any]]:
-        """Intento usando la versión móvil para mejor compatibilidad."""
+        """Intento usando la versión móvil."""
         mobile_url = url.replace("www.facebook.com", "m.facebook.com")
         return await self._extract_manual(mobile_url, mobile=True)
 
-    # ---------------- Métodos internos ----------------
+    # ---------------- Métodos auxiliares ----------------
+    def _format_size(self, size_bytes: Optional[int]) -> str:
+        """Formatea el tamaño en bytes a MB."""
+        if not size_bytes:
+            return "Desconocido"
+        return f"{(size_bytes / 1024 / 1024):.1f} MB"
+
     def _extract_from_meta_tags(self, soup) -> Optional[str]:
         meta_video = (soup.find("meta", property="og:video")
                       or soup.find("meta", property="og:video:url")
@@ -222,98 +285,88 @@ class FacebookExtractor(BaseExtractor):
         thumb_tag = soup.find("meta", property="og:image")
         return thumb_tag["content"] if thumb_tag else ""
 
-    def _build_response(self, info: Dict[str, Any], method: str) -> Dict[str, Any]:
-        return {
-            "status": "success",
-            "platform": "facebook",
-            "title": info.get("title", "Facebook Video"),
-            "description": info.get("description", ""),
-            "thumbnail": info.get("thumbnail", ""),
-            "duration": round(info.get("duration", 0)),
-            "video_url": info.get("url"),
-            "width": info.get("width"),
-            "height": info.get("height"),
-            "uploader": info.get("uploader", ""),
-            "view_count": info.get("view_count", 0),
-            "method": method
-        }
-
+    # ---------------- Métodos de audio ----------------
     async def extract_audio_url(self, url: str, cookies: Optional[str] = None) -> str:
-        """Extrae la URL de audio de un video de Facebook usando yt-dlp."""
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "quiet": True,
-            "no_warnings": True,
-            "http_headers": self.get_platform_headers(),
-        }
-
-        temp_cookie_path = None
-        if cookies:
-            fd, temp_cookie_path = tempfile.mkstemp(suffix=".txt")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(cookies)
-            ydl_opts["cookiefile"] = temp_cookie_path
-
-        loop = asyncio.get_event_loop()
+        """Extrae la URL de audio usando yt-dlp (igual que en Node.js)."""
         try:
+            ydl_opts = {
+                "extract_flat": False,
+                "quiet": True,
+                "no_warnings": True,
+                "format": "bestaudio/best",
+                "geo_bypass": True,
+                "no_check_certificates": True,
+                "http_headers": self.get_platform_headers(),
+            }
+
+            temp_cookie_path = None
+            if cookies:
+                fd, temp_cookie_path = tempfile.mkstemp(suffix=".txt")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(cookies)
+                ydl_opts["cookiefile"] = temp_cookie_path
+
+            loop = asyncio.get_event_loop()
+            
             def extract_sync():
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     return ydl.extract_info(url, download=False)
 
             info = await loop.run_in_executor(None, extract_sync)
 
+            # Buscar el mejor formato de audio
             audio_formats = [
                 f for f in info.get("formats", [])
                 if f.get("acodec") != "none" and f.get("vcodec") == "none" and f.get("url")
             ]
+            
             if audio_formats:
                 audio_formats.sort(key=lambda f: f.get("abr") or 0, reverse=True)
                 return audio_formats[0]["url"]
 
-            if info.get("url") and info.get("acodec") != "none" and info.get("vcodec") == "none":
-                return info["url"]
+            # Fallback: usar el formato que tenga audio
+            for format in info.get("formats", []):
+                if format.get("acodec") != "none" and format.get("url"):
+                    return format["url"]
 
-            raise SnapTubeError("No se encontró URL directa de audio en Facebook")
+            raise SnapTubeError("No se encontró URL de audio")
+
         finally:
             if temp_cookie_path and os.path.exists(temp_cookie_path):
                 os.unlink(temp_cookie_path)
-                
-    async def extract_audio_url_with_fallback(self, url: str, cookies: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Extrae audio de Facebook con fallback seguro.
-        Siempre devuelve un dict plano con:
-        {
-            "audio_url": str,
-            "title": str,
-            "thumbnail": str,
-            "duration": int
-        }
-        """
+
+    async def extract_audio_info(self, url: str, cookies: Optional[str] = None) -> Dict[str, Any]:
+        """Extrae información completa para descarga de audio."""
         try:
-            # Intentar extraer solo audio
+            # Obtener información del video primero
+            video_info = await self.extract(url, cookies=cookies)
+            
+            # Extraer URL de audio
             audio_url = await self.extract_audio_url(url, cookies=cookies)
             
-            # Extraer info completa para title, thumbnail y duration
-            info = await self.extract(url, cookies=cookies)
-            
-            result = {
+            return {
+                "status": "success",
+                "platform": "facebook",
+                "title": video_info.get("title", "Facebook Audio"),
+                "thumbnail": video_info.get("thumbnail", ""),
+                "duration": video_info.get("duration", 0),
                 "audio_url": audio_url,
-                "title": info.get("title") or "Facebook Video",
-                "thumbnail": info.get("thumbnail") or "",
-                "duration": info.get("duration") or 0
+                "filename": f"facebook_audio_{video_info.get('uploader', 'unknown')}_{video_info.get('duration', 0)}.mp3",
+                "method": "yt-dlp audio extraction"
             }
-
-            logger.info(f"🎵 Facebook audio extraction result: {result}")
-            return result
-
-        except SnapTubeError as e:
-            # Fallback absoluto: usar video como fuente de audio
-            info = await self.extract(url, cookies=cookies)
-            result = {
-                "audio_url": info.get("video_url"),
-                "title": info.get("title") or "Facebook Video",
-                "thumbnail": info.get("thumbnail") or "",
-                "duration": info.get("duration") or 0
+            
+        except Exception as e:
+            logger.error(f"Error en extracción de audio: {str(e)}")
+            # Fallback: usar el video como fuente de audio
+            video_info = await self.extract(url, cookies=cookies)
+            return {
+                "status": "success",
+                "platform": "facebook", 
+                "title": video_info.get("title", "Facebook Audio"),
+                "thumbnail": video_info.get("thumbnail", ""),
+                "duration": video_info.get("duration", 0),
+                "audio_url": video_info.get("video_url"),  # Usar URL de video como fallback
+                "filename": f"facebook_audio_fallback_{video_info.get('duration', 0)}.mp3",
+                "method": "fallback video url",
+                "warning": "Audio extraído del stream de video"
             }
-            logger.warning(f"⚠️ Facebook audio fallback used: {result}")
-            return result

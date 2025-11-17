@@ -1,76 +1,39 @@
-# ====================================================================
 # app/routes/audio_routes.py
-# ====================================================================
 import logging
-from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
-from app.utils import validators
-from app.services.tiktok_service import TikTokExtractor
-from app.services.facebook_service import FacebookExtractor
-from app.services.twitter_service import TwitterExtractor
-from app.services.instagram_service import InstagramExtractor
-from app.services.threads_service import ThreadsExtractor
+from app.utils.validators import URLValidator
 from app.services.youtube_service import YouTubeExtractor
 from app.services.base_extractor import SnapTubeError
-import traceback
 
-# Initialize APIRouter
-router = APIRouter()
 logger = logging.getLogger(__name__)
+router = APIRouter()
 
-# Define the path to the cookies file
-COOKIES_FILE = Path("app/cookies/cookies.txt")
-
-# Initialize extractors
-yt_extractor = YouTubeExtractor(cookies_file=str(COOKIES_FILE) if COOKIES_FILE.exists() else None)
-fb_extractor = FacebookExtractor()
-tw_extractor = TwitterExtractor()
-istg_extractor = InstagramExtractor()
-trds_extractor = ThreadsExtractor()
-tk_extractor = TikTokExtractor()
-
-# Initialize URL validator
-validator = validators.URLValidator()
-
+validator = URLValidator()
+yt_extractor = YouTubeExtractor()
 
 @router.get("/audio")
-async def get_audio_url(
-    url: str = Query(..., description="URL del video")
-):
+async def get_audio_url(url: str = Query(..., description="URL del video")):
     """
-    Extrae la URL de audio de diferentes plataformas.
+    Extrae URL de audio - Compatible con frontend
     """
     try:
-        # Detect the platform from the URL
         platform = validator.detect_platform(url)
-        logger.info(f"🔍 Plataforma detectada: {platform}")
+        logger.info(f"🔍 Plataforma detectada para audio: {platform}")
 
-        # Based on the detected platform, call the appropriate extractor
         if platform == "youtube":
-            audio_url = await yt_extractor.extract_audio_url(url)
-        elif platform == "facebook":
-            audio_url = await fb_extractor.extract_audio_url_with_fallback(url)
-        elif platform == "twitter":
-            audio_url = await tw_extractor.extract_audio_url_with_fallback(url)
-        elif platform == "instagram":
-            audio_url = await istg_extractor.extract_audio_url_with_fallback(url)
-        elif platform == "tiktok":
-            audio_url = await tk_extractor.extract_audio_url_with_fallback(url)
-        elif platform == "threads":
-            audio_url = await trds_extractor.extract_audio_url_with_fallback(url)
+            result = await yt_extractor.extract_audio_url(url)
+            return {
+                "status": "success",
+                "audio_url": result["audio_url"],
+                "metadata": result["metadata"]
+            }
         else:
-            raise HTTPException(status_code=400, detail="Plataforma no soportada")
-        
-        # Return the success response
-        return {"status": "success", "audio_url": audio_url}
+            # Para otras plataformas, usar el extractor normal y buscar formatos de audio
+            raise HTTPException(status_code=400, detail="Extracción de audio solo disponible para YouTube por ahora")
 
     except SnapTubeError as e:
-        # Catch specific SnapTube errors for better handling
-        logger.error(f"❌ Error de SnapTube extrayendo audio: {str(e)}")
+        logger.error(f"❌ Error extrayendo audio: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
-        
     except Exception as e:
-        # Catch any other unexpected errors and provide a generic message
-        logger.error(f"❌ Error extrayendo audio: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail="Ocurrió un error inesperado al procesar la solicitud.")
-
+        logger.error(f"❌ Error inesperado en audio: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
