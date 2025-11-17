@@ -23,7 +23,7 @@ class Settings:
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:3001", 
-        "https://fty-downloader-pro-t2z6.vercel.app",
+        "https://backend-freedownloaderpro.up.railway.app/",
         "https://*.vercel.app"
     ]
 
