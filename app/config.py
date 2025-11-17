@@ -18,7 +18,15 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
 
     # Security
-    ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+    #ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+    # Security - ✅ ACTUALIZADO CON TUS DOMINIOS
+    ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "https://fty-downloader-pro-t2z6.vercel.app",
+        "https://*.vercel.app"
+    ]
+
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
 
     # Rate Limiting
