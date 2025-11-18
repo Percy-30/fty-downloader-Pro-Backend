@@ -1,9 +1,12 @@
 # app/routes/combiner_routes.py
 import logging
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse  # ✅ NUEVO
 from pydantic import BaseModel
 from typing import Optional
 import base64
+import os
+import shutil
 
 from app.services.youtube_combiner_service import youtube_combiner
 from app.services.base_extractor import SnapTubeError
@@ -20,8 +23,9 @@ class CombineRequest(BaseModel):
 @router.post("/youtube/combine")
 async def combine_youtube_video_audio(request: CombineRequest):
     """
-    🔥 ENDPOINT PRINCIPAL: Combina video + audio usando el servicio simple
+    🔥 ENDPOINT PRINCIPAL: Combina video + audio usando STREAMING
     """
+    temp_dir = None
     try:
         logger.info(f"🎬 Combinación solicitada: {request.url}")
         
@@ -54,64 +58,59 @@ async def combine_youtube_video_audio(request: CombineRequest):
             audio_itag=audio_itag
         )
         
-        # ✅ VERIFICAR Y PREPARAR RESPUESTA
+        # ✅ VERIFICAR RESULTADO
         if result["status"] != "success":
             raise SnapTubeError("La combinación no fue exitosa")
-            
-        file_content = result.get("file_content")
-        if not file_content:
-            raise SnapTubeError("No se obtuvo contenido del archivo")
         
-        file_size = len(file_content)
-        logger.info(f"✅ Archivo listo para enviar: {file_size} bytes")
+        temp_dir = result.get("temp_dir")
+        final_output = result.get("temp_path")
         
-        # ✅ CONVERTIR A BASE64 DE FORMA SEGURA
-        try:
-            file_content_b64 = base64.b64encode(file_content).decode('utf-8')
-            logger.info(f"✅ Base64 encoding exitoso: {len(file_content_b64)} caracteres")
-        except Exception as e:
-            logger.error(f"❌ Error en encoding base64: {str(e)}")
-            raise SnapTubeError(f"Error procesando archivo: {str(e)}")
+        if not final_output or not os.path.exists(final_output):
+            raise SnapTubeError("No se pudo crear el archivo combinado")
         
-        # ✅ PREPARAR RESPUESTA FINAL
-        response_data = {
-            "status": "success",
-            "file_content": file_content_b64,
-            "filename": result["filename"],
-            "file_size": file_size,
-            "video_itag": video_itag,
-            "audio_itag": audio_itag,
-            "combined": True,
-            "quality": request.quality,
-            "method": "combiner_service"
-        }
+        file_size = os.path.getsize(final_output)
+        filename = result.get("filename", f"youtube_{video_itag}_{audio_itag}.mp4")
         
-        logger.info(f"✅ Combinación completada exitosamente: {result['filename']} ({file_size} bytes)")
-        return response_data
+        logger.info(f"✅ Archivo listo para streaming: {file_size} bytes")
+        
+        # ✅ STREAMING RESPONSE - EVITA CARGAR EN MEMORIA
+        def file_stream():
+            try:
+                with open(final_output, 'rb') as file:
+                    while chunk := file.read(8192):  # 8KB chunks
+                        yield chunk
+            finally:
+                # Limpieza después del streaming
+                if temp_dir and os.path.exists(temp_dir):
+                    try:
+                        shutil.rmtree(temp_dir)
+                        logger.info(f"🧹 Directorio temporal limpiado: {temp_dir}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error limpiando {temp_dir}: {e}")
+        
+        return StreamingResponse(
+            file_stream(),
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{filename}\"",
+                "Content-Length": str(file_size),
+                "X-File-Size": str(file_size),
+                "X-Video-Itag": str(video_itag),
+                "X-Audio-Itag": str(audio_itag)
+            }
+        )
         
     except SnapTubeError as e:
         logger.error(f"❌ Error SnapTube en combinación: {str(e)}")
+        # Limpieza en caso de error
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"💥 Error inesperado en combinación: {str(e)}")
         import traceback
         logger.error(f"📋 Traceback completo:\n{traceback.format_exc()}")
+        # Limpieza en caso de error
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
-
-@router.get("/youtube/formats/{url:path}")
-async def get_available_formats(url: str):
-    """
-    Obtiene los itags disponibles para combinación
-    """
-    try:
-        logger.info(f"🔍 Obteniendo formatos disponibles: {url}")
-        
-        result = await youtube_combiner.get_available_itags(url)
-        return result
-        
-    except SnapTubeError as e:
-        logger.error(f"❌ Error obteniendo formatos: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"💥 Error inesperado: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")

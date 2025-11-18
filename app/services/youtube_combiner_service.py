@@ -26,7 +26,7 @@ class YouTubeCombinerService:
         output_filename: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Descarga y combina video + audio automáticamente
+        Descarga y combina video + audio automáticamente (OPTIMIZADO PARA STREAMING)
         """
         try:
             logger.info(f"🎬 Iniciando combinación: {url}")
@@ -61,24 +61,15 @@ class YouTubeCombinerService:
             file_size = os.path.getsize(final_output)
             logger.info(f"✅ Combinación exitosa: {file_size} bytes")
 
-            # Leer archivo como bytes para enviar
-            logger.info("📖 Leyendo archivo como bytes...")
-            try:
-                with open(final_output, 'rb') as f:
-                    file_content = f.read()
-                logger.info(f"✅ Archivo leído exitosamente: {len(file_content)} bytes")
-            except Exception as e:
-                logger.error(f"❌ Error leyendo archivo: {str(e)}")
-                raise SnapTubeError(f"Error leyendo archivo combinado: {str(e)}")
-
+            # ✅ OPTIMIZACIÓN PARA STREAMING: NO leer el archivo completo
             return {
                 "status": "success",
-                "file_content": file_content,
                 "filename": output_filename,
                 "file_size": file_size,
                 "video_itag": video_itag,
                 "audio_itag": audio_itag,
                 "temp_path": final_output,
+                "temp_dir": self.temp_dir,  # ✅ NUEVO: Para limpieza controlada
                 "combined": True
             }
 
@@ -186,6 +177,133 @@ class YouTubeCombinerService:
                 logger.info(f"🧹 Directorio temporal limpiado: {self.temp_dir}")
         except Exception as e:
             logger.warning(f"⚠️ Error limpiando temporales: {e}")
+
+    async def get_available_itags(self, url: str) -> Dict[str, Any]:
+        """
+        Obtiene los itags disponibles para un video de YouTube
+        """
+        try:
+            logger.info(f"🔍 Obteniendo itags disponibles para: {url}")
+            
+            cmd = [
+                "yt-dlp",
+                "--no-playlist",
+                "--list-formats",
+                url
+            ]
+            
+            result = await asyncio.to_thread(
+                self._run_subprocess_sync, cmd, "list_formats"
+            )
+            
+            # Procesar la salida para extraer itags
+            formats = self._parse_formats_output(result.stdout)
+            
+            return {
+                "status": "success",
+                "url": url,
+                "formats": formats,
+                "total_formats": len(formats)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo itags: {str(e)}")
+            raise SnapTubeError(f"Error obteniendo formatos disponibles: {str(e)}")
+
+    def _parse_formats_output(self, output: str) -> list:
+        """
+        Parsea la salida de yt-dlp --list-formats para extraer información de formatos
+        """
+        formats = []
+        lines = output.split('\n')
+        
+        # Buscar la línea que inicia la tabla de formatos
+        start_parsing = False
+        
+        for line in lines:
+            if "format code" in line and "extension" in line:
+                start_parsing = True
+                continue
+                
+            if start_parsing and line.strip():
+                # Parsear línea de formato
+                parts = line.split()
+                if len(parts) >= 4:
+                    try:
+                        format_info = {
+                            "itag": parts[0],
+                            "extension": parts[1],
+                            "resolution": parts[2] if len(parts) > 2 else "",
+                            "note": " ".join(parts[3:]) if len(parts) > 3 else ""
+                        }
+                        formats.append(format_info)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error parseando línea de formato: {line}")
+                        continue
+        
+        logger.info(f"📊 Formatos parseados: {len(formats)}")
+        return formats
+
+    async def extract_info(self, url: str) -> Dict[str, Any]:
+        """
+        Extrae información básica del video usando yt-dlp
+        """
+        try:
+            logger.info(f"🔍 Extrayendo información de: {url}")
+            
+            cmd = [
+                "yt-dlp",
+                "--no-playlist",
+                "--dump-json",
+                url
+            ]
+            
+            result = await asyncio.to_thread(
+                self._run_subprocess_sync, cmd, "extract_info"
+            )
+            
+            import json
+            video_info = json.loads(result.stdout)
+            
+            logger.info(f"✅ Información extraída: {video_info.get('title', 'Unknown')}")
+            return video_info
+            
+        except Exception as e:
+            logger.error(f"❌ Error extrayendo información: {str(e)}")
+            raise SnapTubeError(f"Error extrayendo información del video: {str(e)}")
+
+    def estimate_combined_size(self, video_info: Dict[str, Any], video_itag: int, audio_itag: int) -> int:
+        """
+        Estima el tamaño combinado del video + audio
+        """
+        try:
+            # Buscar información del formato de video
+            video_format = None
+            audio_format = None
+            
+            formats = video_info.get('formats', [])
+            for fmt in formats:
+                if fmt.get('format_id') == str(video_itag):
+                    video_format = fmt
+                if fmt.get('format_id') == str(audio_itag):
+                    audio_format = fmt
+            
+            video_size = video_format.get('filesize') or video_format.get('filesize_approx', 0)
+            audio_size = audio_format.get('filesize') or audio_format.get('filesize_approx', 0)
+            
+            # Estimación conservadora (video + audio + overhead)
+            estimated_size = (video_size or 0) + (audio_size or 0) + (1024 * 1024)  # +1MB overhead
+            
+            logger.info(f"📊 Tamaño estimado: {estimated_size // 1024 // 1024}MB")
+            return estimated_size
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Error estimando tamaño: {str(e)}")
+            return 100 * 1024 * 1024  # Fallback: 100MB
+
+    def __del__(self):
+        """Destructor para limpieza automática"""
+        self._cleanup_temp_files()
 
 # Instancia global del servicio
 youtube_combiner = YouTubeCombinerService()
