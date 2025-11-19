@@ -24,7 +24,9 @@ class Settings:
         "http://localhost:3000",
         "http://localhost:3001", 
         "https://fty-downloader-pro.vercel.app/",
-        "https://*.vercel.app"
+        "https://fty-downloader-pro.netlify.app/",
+        "https://*.vercel.app",
+        "https://*.netlify.app/",
     ]
 
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
