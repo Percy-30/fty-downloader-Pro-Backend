@@ -20,13 +20,18 @@ class Settings:
     # Security
     #ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
     # Security - ✅ ACTUALIZADO CON TUS DOMINIOS
+    # Security - ✅ ACTUALIZADO CON TUS DOMINIOS
     ALLOWED_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:3001", 
-        "https://fty-downloader-pro.vercel.app/",
-        "https://fty-downloader-pro.netlify.app/",
-        "https://*.vercel.app",
-        "https://*.netlify.app/",
+    "http://localhost:3000",
+    "http://localhost:3001", 
+    "https://fty-downloader-pro.vercel.app",
+    "https://fty-downloader-pro.netlify.app",
+    "https://*.vercel.app",
+    "https://*.netlify.app",
+    # 🆕 NUEVOS DOMINIOS - AGREGAR ESTOS
+    "https://ftydownloader.com",
+    "https://www.ftydownloader.com",
+    "https://*.ftydownloader.com",
     ]
 
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
