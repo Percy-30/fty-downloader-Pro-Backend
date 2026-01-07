@@ -87,3 +87,38 @@ async def download_facebook_video(
     except Exception as e:
         logger.error(f"💥 Facebook video error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+# Modelo request para merge
+class FacebookMergeRequest(BaseModel):
+    audio_url: str
+    thumbnail_url: str
+    filename: str
+
+from fastapi.responses import StreamingResponse
+
+@router.post("/proxy-merge")
+async def proxy_merge_facebook(request: FacebookMergeRequest):
+    """Proxy que descarga audio + thumbnail y los fusiona al vuelo."""
+    try:
+        logger.info(f"🔀 Merge Request: {request.filename}")
+        
+        generator = await facebook_extractor.stream_audio_with_thumbnail(
+            request.audio_url, 
+            request.thumbnail_url
+        )
+        
+        # Asegurar extension .m4a
+        filename = request.filename
+        if not filename.endswith('.m4a'):
+            filename = filename.rsplit('.', 1)[0] + '.m4a'
+            
+        headers = {
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Type': 'audio/mp4'
+        }
+        
+        return StreamingResponse(generator, headers=headers)
+        
+    except Exception as e:
+        logger.error(f"💥 Facebook merge error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")

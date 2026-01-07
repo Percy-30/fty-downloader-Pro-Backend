@@ -370,3 +370,51 @@ class FacebookExtractor(BaseExtractor):
                 "method": "fallback video url",
                 "warning": "Audio extraído del stream de video"
             }
+    # ---------------- Procesamiento FFmpeg ----------------
+    async def stream_audio_with_thumbnail(self, audio_url: str, thumbnail_url: str):
+        """Genera un stream de FFmpeg fusionando audio y miniatura (M4A Rápido)."""
+        import subprocess
+
+        # Comando FFmpeg optimizado (copia audio, pega imagen, formato ipod/m4a)
+        cmd = [
+            'ffmpeg',
+            '-i', audio_url,
+            '-i', thumbnail_url,
+            '-map', '0:0',
+            '-map', '1:0',
+            '-c', 'copy',
+            '-disposition:v:1', 'attached_pic',
+            '-f', 'ipod',  # Formato contenedor MP4/M4A friendly
+            '-'  # Salida a stdout
+        ]
+        
+        logger.info(f"🎵 Iniciando FFmpeg Merge: {' '.join(cmd)}")
+
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, # Capturar errores pero no mezclar con output
+            bufsize=10**7 # Buffer grande
+        )
+        
+        # Generador para StreamingResponse
+        def stream_generator():
+            try:
+                while True:
+                    chunk = process.stdout.read(64 * 1024) # 64KB chunks
+                    if not chunk:
+                        break
+                    yield chunk
+            except Exception as e:
+                logger.error(f"Error streaming ffmpeg: {e}")
+                process.kill()
+            finally:
+                process.stdout.close()
+                process.wait()
+                
+                # Check for errors if failed
+                if process.returncode != 0:
+                    error_out = process.stderr.read()
+                    logger.error(f"FFmpeg Error Output: {error_out}")
+
+        return stream_generator()
