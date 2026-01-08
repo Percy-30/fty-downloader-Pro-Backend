@@ -91,6 +91,7 @@ class YouTubeCombinerService:
                 "--no-simulate",
                 "--socket-timeout", "30",
                 "--retries", "2",
+                "--remote-components", "ejs:github",
                 url
             ]
             
