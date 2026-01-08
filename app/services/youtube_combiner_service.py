@@ -54,6 +54,16 @@ class YouTubeCombinerService:
             logger.info("🎞️ Combinando con ffmpeg...")
             await self._merge_video_audio_threaded(temp_video, temp_audio, final_output)
 
+            # ✅ LIMPIEZA INMEDIATA: Borrar partes separadas una vez unido
+            try:
+                if os.path.exists(temp_video):
+                    os.remove(temp_video)
+                if os.path.exists(temp_audio):
+                    os.remove(temp_audio)
+                logger.info("🧹 Partes temporales (video/audio) eliminadas tras combinación")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudieron borrar las partes temporales: {e}")
+
             # Verificar que el archivo final existe
             if not os.path.exists(final_output):
                 raise SnapTubeError("No se pudo crear el archivo combinado")
@@ -93,8 +103,15 @@ class YouTubeCombinerService:
                 "--remote-components", "ejs:github",
                 "--extractor-args", "youtube:player-client=ios,tv,web;skip=dash,hls",
                 "--cache-dir", "/app/cache/yt_dlp",
-                url
             ]
+            
+            # ✅ AGREGAR COOKIES SI EXISTEN
+            cookies_path = "/app/cookies/cookies.txt"
+            if os.path.exists(cookies_path) and os.path.getsize(cookies_path) > 10:
+                cmd.extend(["--cookiefile", cookies_path])
+                logger.info("🍪 Usando archivo de cookies en combinador")
+
+            cmd.append(url)
             
             logger.info(f"🔧 Ejecutando comando: {' '.join(cmd)}")
             
