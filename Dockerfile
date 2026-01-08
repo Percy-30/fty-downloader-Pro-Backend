@@ -32,7 +32,14 @@ RUN apt-get update && apt-get install -y \
     libpangocairo-1.0-0 \
     libpango-1.0-0 \
     git \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# ✅ INSTALAR DENO (Requerido para descifrar YouTube)
+RUN curl -fsSL https://deno.land/install.sh | sh \
+    && ln -s /root/.deno/bin/deno /usr/local/bin/deno \
+    && chmod +x /usr/local/bin/deno
+ENV PATH="/usr/local/bin:$PATH"
 
 # Copiar requirements.txt primero para aprovechar cache
 COPY requirements.txt ./
