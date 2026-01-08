@@ -35,11 +35,11 @@ RUN apt-get update && apt-get install -y \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# ✅ INSTALAR DENO (Requerido para descifrar YouTube)
-RUN curl -fsSL https://deno.land/install.sh | sh \
-    && ln -s /root/.deno/bin/deno /usr/local/bin/deno \
-    && chmod +x /usr/local/bin/deno
-ENV PATH="/usr/local/bin:$PATH"
+# ✅ INSTALAR DENO (Robust configuration)
+ENV DENO_INSTALL=/root/.deno
+RUN curl -fsSL https://deno.land/install.sh | sh
+ENV PATH="$DENO_INSTALL/bin:$PATH"
+RUN ln -sf /root/.deno/bin/deno /usr/local/bin/deno && chmod +x /usr/local/bin/deno
 
 # Copiar requirements.txt primero para aprovechar cache
 COPY requirements.txt ./

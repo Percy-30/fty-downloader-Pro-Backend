@@ -76,6 +76,14 @@ async def lifespan(app: FastAPI):
     if not ensure_valid_cookies():
         logger.error("🚨 No se pudieron generar cookies al iniciar. El API puede fallar en peticiones a YouTube.")
 
+    # ✅ DIAGNÓSTICO DE DENO (Requerido para YouTube HD)
+    try:
+        import subprocess
+        deno_version = subprocess.check_output(["deno", "--version"], stderr=subprocess.STDOUT).decode()
+        logger.info(f"✅ Deno detectado correctamente:\n{deno_version}")
+    except Exception as e:
+        logger.error(f"❌ ERROR: Deno no está instalado o no es accesible. YouTube HD podría fallar. Error: {e}")
+
     # Tarea en segundo plano para limpieza
     cleanup_task = asyncio.create_task(periodic_cleanup())
 
