@@ -37,9 +37,9 @@ async def combine_youtube_video_audio(request: CombineRequest):
             "480p": (135, 140),
             "720p": (136, 140),
             "1080p": (137, 140),
-            "1440p": (400, 140),
-            "2160p": (401, 140),
-            "4k": (401, 140)
+            "1440p": (271, 140),  # VP9 1440p
+            "2160p": (313, 140),  # VP9 4K
+            "4k": (313, 140)
         }
         
         # ✅ USAR ITAGS ESPECÍFICOS SI SE PROVEEN (INCLUSO SI SON NONE)

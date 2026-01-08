@@ -147,7 +147,7 @@ class YouTubeCombinerService:
                 "--socket-timeout", "30",
                 "--retries", "2",
                 "--remote-components", "ejs:github",
-                "--extractor-args", "youtube:player-client=tv,web,android;skip=dash,hls",
+                "--extractor-args", "youtube:player-client=tv,web,android",
                 "--cache-dir", "/app/cache/yt_dlp",
             ]
             
