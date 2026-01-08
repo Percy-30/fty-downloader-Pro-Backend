@@ -84,7 +84,7 @@ class YouTubeExtractor(BaseExtractor):
                 "retries": 3,
                 "skip_unavailable_fragments": True,
                 "http_headers": self.get_platform_headers(),
-                "remote_components": "ejs:github",
+                "remote_components": ["ejs:github"],
             }
 
             cookies_file_path = self._ensure_cookies()
