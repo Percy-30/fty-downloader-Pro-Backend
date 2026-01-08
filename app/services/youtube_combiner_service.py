@@ -96,14 +96,23 @@ class YouTubeCombinerService:
             cmd = [
                 "yt-dlp",
                 "--no-playlist",
-                "-f", str(itag),
                 "-o", output_path,
                 "--socket-timeout", "30",
                 "--retries", "2",
                 "--remote-components", "ejs:github",
-                "--extractor-args", "youtube:player-client=ios,tv,web;skip=dash,hls",
+                "--extractor-args", "youtube:player-client=tv,android,web;skip=dash,hls",
                 "--cache-dir", "/app/cache/yt_dlp",
             ]
+            
+            # ✅ FALLBACK INTELIGENTE: Si el itag falla, intentar por altura
+            height_map = {137: 1080, 136: 720, 135: 480, 134: 360, 133: 240, 160: 144}
+            target_height = height_map.get(itag)
+            
+            if target_height:
+                # Intentar itag específico, si no, el mejor de esa altura
+                cmd.extend(["-f", f"{itag}/bestvideo[height={target_height}][ext=mp4]/bestvideo[height<={target_height}]"])
+            else:
+                cmd.extend(["-f", str(itag)])
             
             # ✅ AGREGAR COOKIES SI EXISTEN
             cookies_path = "/app/cookies/cookies.txt"

@@ -45,7 +45,8 @@ RUN ln -sf /root/.deno/bin/deno /usr/local/bin/deno && chmod +x /usr/local/bin/d
 COPY requirements.txt ./
 
 # Instalar dependencias Python
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -U yt-dlp
 
 # Instalar Chromium para Playwright
 RUN python -m playwright install chromium
