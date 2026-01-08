@@ -88,10 +88,11 @@ class YouTubeCombinerService:
                 "--no-playlist",
                 "-f", str(itag),
                 "-o", output_path,
-                "--no-simulate",
                 "--socket-timeout", "30",
                 "--retries", "2",
                 "--remote-components", "ejs:github",
+                "--extractor-args", "youtube:player-client=ios,tv,web;skip=dash,hls",
+                "--cache-dir", "/app/cache/yt_dlp",
                 url
             ]
             

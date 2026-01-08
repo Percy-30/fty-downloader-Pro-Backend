@@ -85,6 +85,13 @@ class YouTubeExtractor(BaseExtractor):
                 "skip_unavailable_fragments": True,
                 "http_headers": self.get_platform_headers(),
                 "remote_components": ["ejs:github"],
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["ios", "tv", "web"],
+                        "skip": ["dash", "hls"]
+                    }
+                },
+                "cachedir": "/app/cache/yt_dlp",
             }
 
             cookies_file_path = self._ensure_cookies()

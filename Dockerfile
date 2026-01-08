@@ -53,8 +53,10 @@ RUN python -m playwright install chromium
 # Copiar código fuente
 COPY app/ ./app/
 
-# Crear carpeta cookies y archivo cookies.txt vacío
-RUN mkdir -p /app/cookies && touch /app/cookies/cookies.txt
+# Crear directorios necesarios
+RUN mkdir -p /app/cookies /app/cache/yt_dlp && \
+    touch /app/cookies/cookies.txt && \
+    chmod -R 777 /app/cache
 
 # Variables de entorno
 ENV PYTHONPATH=/app
