@@ -18,16 +18,63 @@ class YouTubeCombinerService:
         self.temp_dir = tempfile.mkdtemp(prefix="yt_combiner_")
         logger.info(f"📁 Directorio temporal creado: {self.temp_dir}")
 
+    async def download_single(
+        self,
+        url: str,
+        itag: int,
+        output_filename: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Descarga un solo formato (video o audio) de forma segura (PROXIED)
+        """
+        try:
+            logger.info(f"📥 Descarga simple solicitada: {url} (itag {itag})")
+            
+            if not output_filename:
+                output_filename = f"youtube_single_{itag}_{int(asyncio.get_event_loop().time())}.mp4"
+            
+            output_path = os.path.join(self.temp_dir, output_filename)
+            
+            # Paso único: Descargar formato
+            await self._download_format_threaded(url, itag, output_path, "single")
+            
+            if not os.path.exists(output_path):
+                raise SnapTubeError("No se pudo descargar el archivo")
+                
+            file_size = os.path.getsize(output_path)
+            
+            return {
+                "status": "success",
+                "filename": output_filename,
+                "file_size": file_size,
+                "temp_path": output_path,
+                "temp_dir": self.temp_dir,
+                "combined": False
+            }
+        except Exception as e:
+            logger.error(f"❌ Error en descarga simple: {str(e)}")
+            raise SnapTubeError(f"Error descargando formato: {str(e)}")
+
     async def download_and_combine(
         self, 
         url: str, 
-        video_itag: int = 137,
-        audio_itag: int = 140,
+        video_itag: Optional[int] = None,
+        audio_itag: Optional[int] = None,
         output_filename: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Descarga y combina video + audio automáticamente (OPTIMIZADO PARA STREAMING)
+        Si solo se provee un itag, funciona como descarga simple.
         """
+        # Si falta uno de los itags, derivar a descarga simple automáticamente
+        if video_itag and not audio_itag:
+            return await self.download_single(url, video_itag, output_filename)
+        if audio_itag and not video_itag:
+            return await self.download_single(url, audio_itag, output_filename)
+        if not video_itag and not audio_itag:
+            # Fallback a 1080p por defecto si no hay itags
+            video_itag, audio_itag = 137, 140
+
         try:
             logger.info(f"🎬 Iniciando combinación: {url}")
             logger.info(f"🎯 Itags - Video: {video_itag}, Audio: {audio_itag}")

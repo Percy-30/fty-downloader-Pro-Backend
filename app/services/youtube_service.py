@@ -137,6 +137,7 @@ class YouTubeExtractor(BaseExtractor):
                 continue
                 
             format_info = {
+                'itag': f.get('format_id'),
                 'quality': f.get('format_note', 'unknown') or f.get('format_id', 'unknown'),
                 'format': f.get('ext', 'mp4'),
                 'resolution': self._get_resolution_display(f),

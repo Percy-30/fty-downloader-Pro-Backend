@@ -51,7 +51,7 @@ async def combine_youtube_video_audio(request: CombineRequest):
 
         logger.info(f"🎯 Itags - Video: {video_itag}, Audio: {audio_itag}")
         
-        # ✅ EJECUTAR COMBINACIÓN
+        # ✅ EJECUTAR COMBINACIÓN (O DESCARGA SIMPLE SI FALTA UNO)
         result = await youtube_combiner.download_and_combine(
             url=request.url,
             video_itag=video_itag,
