@@ -43,14 +43,15 @@ async def combine_youtube_video_audio(request: CombineRequest):
         }
         
         # ✅ USAR ITAGS ESPECÍFICOS SI SE PROVEEN (INCLUSO SI SON NONE)
-        # Si el frontend envía itags, los respetamos. Si no envía ninguno, usamos el mapa.
-        if request.video_itag is not None or request.audio_itag is not None:
+        # Solo usamos el mapa de calidad si el frontend no envió itags específicos.
+        # Si envió al menos uno (incluso null), los respetamos.
+        if request.video_itag is not None or "audio_itag" in request.dict(exclude_unset=True):
             video_itag = request.video_itag
             audio_itag = request.audio_itag
         else:
             video_itag, audio_itag = quality_to_itag.get(request.quality, (137, 140))
 
-        logger.info(f"🎯 Itags Finales - Video: {video_itag}, Audio: {audio_itag}")
+        logger.info(f"🎯 Itags Finales Procesados - Video: {video_itag}, Audio: {audio_itag}")
         
         # ✅ EJECUTAR COMBINACIÓN (O DESCARGA SIMPLE SI FALTA UNO)
         result = await youtube_combiner.download_and_combine(

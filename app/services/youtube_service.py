@@ -85,11 +85,11 @@ class YouTubeExtractor(BaseExtractor):
                 "http_headers": self.get_platform_headers(),
                 "remote_components": ["ejs:github"],
                 "extractor_args": {
-                    "youtube": {}
+                    "youtube": {
+                        "player_client": ["tv"]
+                    }
                 },
                 "cachedir": "/app/cache/yt_dlp",
-                "youtube_include_dash_manifest": True,
-                "youtube_include_hls_manifest": True,
             }
 
             cookies_file_path = self._ensure_cookies()
