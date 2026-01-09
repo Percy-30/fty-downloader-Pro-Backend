@@ -85,6 +85,7 @@ async def combine_youtube_video_audio(request: CombineRequest):
         
         filename = base_filename.replace('"', '').replace("'", "")
         
+        file_size = result.get("file_size", 0)
         logger.info(f"✅ Archivo listo para streaming: {file_size} bytes ({media_type})")
         
         # ✅ STREAMING RESPONSE - EVITA CARGAR EN MEMORIA
