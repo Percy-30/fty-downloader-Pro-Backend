@@ -22,7 +22,9 @@ class YouTubeCombinerService:
         self,
         url: str,
         itag: int,
-        output_filename: Optional[str] = None
+        output_filename: Optional[str] = None,
+        strip_audio: bool = False,
+        strip_video: bool = False
     ) -> Dict[str, Any]:
         """
         Descarga un solo formato (video o audio) de forma segura (PROXIED)
@@ -36,7 +38,7 @@ class YouTubeCombinerService:
             output_path = os.path.join(self.temp_dir, output_filename)
             
             # Paso único: Descargar formato
-            await self._download_format_threaded(url, itag, output_path, "single")
+            await self._download_format_threaded(url, itag, output_path, "single", strip_audio=strip_audio, strip_video=strip_video)
             
             if not os.path.exists(output_path):
                 raise SnapTubeError("No se pudo descargar el archivo")
@@ -68,9 +70,9 @@ class YouTubeCombinerService:
         """
         # Si falta uno de los itags, derivar a descarga simple automáticamente
         if video_itag and not audio_itag:
-            return await self.download_single(url, video_itag, output_filename)
+            return await self.download_single(url, video_itag, output_filename, strip_audio=True)
         if audio_itag and not video_itag:
-            return await self.download_single(url, audio_itag, output_filename)
+            return await self.download_single(url, audio_itag, output_filename, strip_video=True)
         if not video_itag and not audio_itag:
             # Fallback a 1080p por defecto si no hay itags
             video_itag, audio_itag = 137, 140
@@ -135,15 +137,20 @@ class YouTubeCombinerService:
             self._cleanup_temp_files()
             raise SnapTubeError(f"Error combinando video y audio: {str(e)}")
 
-    async def _download_format_threaded(self, url: str, itag: int, output_path: str, format_type: str):
+    async def _download_format_threaded(self, url: str, itag: int, output_path: str, format_type: str, strip_audio: bool = False, strip_video: bool = False):
         """Descarga un formato específico usando yt-dlp (threaded para Windows)"""
-        logger.info(f"⬇️ Descargando {format_type} (itag {itag})")
+        logger.info(f"⬇️ Descargando {format_type} (itag {itag}) - Strip A: {strip_audio}, V: {strip_video}")
         
         try:
+            # Archivo de descarga inicial
+            download_path = output_path
+            if strip_audio or strip_video:
+                download_path = output_path + ".raw"
+
             cmd = [
                 "yt-dlp",
                 "--no-playlist",
-                "-o", output_path,
+                "-o", download_path,
                 "--socket-timeout", "30",
                 "--retries", "2",
                 "--remote-components", "ejs:github",
@@ -151,15 +158,8 @@ class YouTubeCombinerService:
                 "--cache-dir", "/app/cache/yt_dlp",
             ]
             
-            # ✅ FALLBACK INTELIGENTE: Si el itag falla, intentar por altura
-            height_map = {137: 1080, 136: 720, 135: 480, 134: 360, 133: 240, 160: 144}
-            target_height = height_map.get(itag)
-            
-            if target_height:
-                # Intentar itag específico, si no, el mejor de esa altura
-                cmd.extend(["-f", f"{itag}/bestvideo[height={target_height}][ext=mp4]/bestvideo[height<={target_height}]"])
-            else:
-                cmd.extend(["-f", str(itag)])
+            # Forzar itag exacto para máxima precisión
+            cmd.extend(["-f", str(itag)])
             
             # ✅ AGREGAR COOKIES SI EXISTEN
             cookies_path = "/app/cookies/cookies.txt"
@@ -176,11 +176,29 @@ class YouTubeCombinerService:
                 self._run_subprocess_sync, cmd, format_type
             )
             
-            if not os.path.exists(output_path):
-                raise SnapTubeError(f"Archivo {format_type} no se creó: {output_path}")
+            if not os.path.exists(download_path):
+                raise SnapTubeError(f"Archivo {format_type} no se creó: {download_path}")
                 
+            # ✅ PROCESAMIENTO POST-DESCARGA (Strips)
+            if strip_audio or strip_video:
+                logger.info(f"🎞️ Aplicando stripping a {format_type}...")
+                ffmpeg_cmd = ["ffmpeg", "-i", download_path, "-y"]
+                if strip_audio:
+                    ffmpeg_cmd.extend(["-an"])
+                if strip_video:
+                    ffmpeg_cmd.extend(["-vn"])
+                
+                # Para audio y video solo, intentamos copiar códec para velocidad
+                ffmpeg_cmd.extend(["-c", "copy", output_path])
+                
+                await asyncio.to_thread(self._run_subprocess_sync, ffmpeg_cmd, "ffmpeg_strip")
+                
+                # Limpiar archivo raw
+                if os.path.exists(download_path):
+                    os.remove(download_path)
+            
             file_size = os.path.getsize(output_path)
-            logger.info(f"✅ {format_type.capitalize()} descargado: {file_size} bytes")
+            logger.info(f"✅ {format_type.capitalize()} listo: {file_size} bytes")
 
         except Exception as e:
             logger.error(f"❌ Error descargando {format_type}: {str(e)}")

@@ -79,7 +79,6 @@ class YouTubeExtractor(BaseExtractor):
                 "geo_bypass": True,
                 "noplaylist": True,
                 "extract_flat": False,
-                "format": "best",
                 "socket_timeout": 30,
                 "retries": 3,
                 "skip_unavailable_fragments": True,
