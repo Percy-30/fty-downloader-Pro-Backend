@@ -66,19 +66,32 @@ async def combine_youtube_video_audio(request: CombineRequest):
         temp_dir = result.get("temp_dir")
         final_output = result.get("temp_path")
         
-        if not final_output or not os.path.exists(final_output):
-            raise SnapTubeError("No se pudo crear el archivo combinado")
+        # ✅ DETECTAR TIPO DE CONTENIDO FINAL
+        is_audio_only = audio_itag and not video_itag
+        is_video_only = video_itag and not audio_itag
+        is_combined = video_itag and audio_itag
+
+        if is_audio_only:
+            media_type = "audio/mpeg" if "audio" in result.get("filename", "").lower() else "audio/mp4"
+            ext = "mp3" if "audio/mpeg" in media_type else "m4a"
+        else:
+            media_type = "video/mp4"
+            ext = "mp4"
+
+        # Re-construir filename si es necesario para asegurar extensión correcta
+        base_filename = result.get("filename", f"youtube_{request.quality}_{video_itag or audio_itag}")
+        if not base_filename.endswith(f".{ext}"):
+            base_filename = base_filename.rsplit('.', 1)[0] + f".{ext}"
         
-        file_size = os.path.getsize(final_output)
-        filename = result.get("filename", f"youtube_{video_itag}_{audio_itag}.mp4")
+        filename = base_filename.replace('"', '').replace("'", "")
         
-        logger.info(f"✅ Archivo listo para streaming: {file_size} bytes")
+        logger.info(f"✅ Archivo listo para streaming: {file_size} bytes ({media_type})")
         
         # ✅ STREAMING RESPONSE - EVITA CARGAR EN MEMORIA
         def file_stream():
             try:
                 with open(final_output, 'rb') as file:
-                    while chunk := file.read(8192):  # 8KB chunks
+                    while chunk := file.read(16384):  # 16KB chunks para mejor performance en streams
                         yield chunk
             finally:
                 # Limpieza después del streaming
@@ -91,13 +104,16 @@ async def combine_youtube_video_audio(request: CombineRequest):
         
         return StreamingResponse(
             file_stream(),
-            media_type="video/mp4",
+            media_type=media_type,
             headers={
                 "Content-Disposition": f"attachment; filename=\"{filename}\"",
                 "Content-Length": str(file_size),
                 "X-File-Size": str(file_size),
-                "X-Video-Itag": str(video_itag),
-                "X-Audio-Itag": str(audio_itag)
+                "X-Video-Itag": str(video_itag or ""),
+                "X-Audio-Itag": str(audio_itag or ""),
+                "X-Is-Audio": "true" if is_audio_only else "false",
+                "X-Is-Video": "false" if is_audio_only else "true",
+                "Access-Control-Expose-Headers": "Content-Disposition, Content-Length, X-File-Size, X-Video-Itag, X-Audio-Itag, X-Is-Audio, X-Is-Video"
             }
         )
         

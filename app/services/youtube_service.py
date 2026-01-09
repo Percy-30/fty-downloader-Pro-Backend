@@ -135,6 +135,9 @@ class YouTubeExtractor(BaseExtractor):
             if not (f.get('url') and f.get('protocol') in ('http', 'https')):
                 continue
                 
+            acodec = f.get('acodec', 'none')
+            vcodec = f.get('vcodec', 'none')
+            
             format_info = {
                 'itag': f.get('format_id'),
                 'quality': f.get('format_note', 'unknown') or f.get('format_id', 'unknown'),
@@ -142,13 +145,13 @@ class YouTubeExtractor(BaseExtractor):
                 'resolution': self._get_resolution_display(f),
                 'size': self._get_size_display(f),
                 'url': f['url'],
-                'hasAudio': f.get('acodec') != 'none',
-                'hasVideo': f.get('vcodec') != 'none',
+                'hasAudio': acodec != 'none' and acodec is not None,
+                'hasVideo': vcodec != 'none' and vcodec is not None,
                 'fps': f.get('fps'),
                 'height': f.get('height'),
                 'width': f.get('width'),
-                'vcodec': f.get('vcodec', ''),
-                'acodec': f.get('acodec', '')
+                'vcodec': vcodec,
+                'acodec': acodec
             }
             
             # Clasificar en categorías
@@ -307,7 +310,7 @@ class YouTubeExtractor(BaseExtractor):
 
     def _get_size_display(self, format_info: Dict) -> str:
         """Obtiene el tamaño en formato legible"""
-        filesize = format_info.get('filesize')
+        filesize = format_info.get('filesize') or format_info.get('filesize_approx')
         if filesize:
             size_mb = filesize / (1024 * 1024)
             if size_mb < 1:
