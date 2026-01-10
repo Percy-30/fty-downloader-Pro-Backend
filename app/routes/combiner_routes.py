@@ -7,6 +7,9 @@ from typing import Optional
 import base64
 import os
 import shutil
+import asyncio  # ✅ AGREGADO
+import time
+from app.config import settings  # ✅ AGREGADO
 
 from app.services.youtube_combiner_service import youtube_combiner
 from app.services.base_extractor import SnapTubeError
@@ -78,7 +81,7 @@ async def combine_youtube_video_audio(request: CombineRequest):
         if not video_itag and audio_itag:
             media_type = "audio/mpeg" if "mp3" in result.get("filename", "").lower() else "audio/mp4"
             ext = "mp3" if media_type == "audio/mpeg" else "m4a"
-            filename = f"youtube_audio_{audio_itag}_{int(asyncio.get_event_loop().time())}.{ext}"
+            filename = f"youtube_audio_{audio_itag}_{int(time.time())}.{ext}"
         elif video_itag and not audio_itag:
             media_type = "video/mp4"
             ext = request.format_type or "mp4"
@@ -86,7 +89,7 @@ async def combine_youtube_video_audio(request: CombineRequest):
         else:
             media_type = "video/mp4"
             ext = "mp4"
-            filename = f"youtube_combined_{video_itag}_{audio_itag}_{int(asyncio.get_event_loop().time())}.{ext}"
+            filename = f"youtube_combined_{video_itag}_{audio_itag}_{int(time.time())}.{ext}"
         
         file_size = result.get("file_size", 0)
         logger.info(f"✅ Archivo listo para streaming: {file_size} bytes ({media_type})")
