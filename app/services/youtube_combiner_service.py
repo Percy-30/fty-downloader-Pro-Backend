@@ -77,67 +77,39 @@ class YouTubeCombinerService:
         Descarga y combina video + audio automáticamente (OPTIMIZADO PARA STREAMING)
         Si solo se provee un itag, funciona como descarga simple.
         """
-        # Si falta uno de los itags, derivar a descarga simple automáticamente
-        if video_itag and not audio_itag:
-            return await self.download_single(url, video_itag, output_filename, strip_audio=True)
-        if audio_itag and not video_itag:
-            # ✅ SOLO AUDIO: Descargar y opcionalmente convertir a MP3
-            temp_dir = tempfile.mkdtemp(prefix="yt_audio_", dir=self.base_temp_dir)
-            temp_audio_raw = os.path.join(temp_dir, f"audio_raw_{audio_itag}.m4a")
-            await self._download_format_threaded(url, audio_itag, temp_audio_raw, "audio", temp_dir)
-            
-            if format_type.lower() == "mp3":
-                final_audio = os.path.join(temp_dir, f"audio_final_{audio_itag}_{int(asyncio.get_event_loop().time())}.mp3")
-                await self._convert_to_mp3_threaded(temp_audio_raw, final_audio)
-                # Limpiar el raw después de convertir
-                if os.path.exists(temp_audio_raw):
-                    os.remove(temp_audio_raw)
-                
-                file_size = os.path.getsize(final_audio)
-                return {
-                    "status": "success",
-                    "filename": os.path.basename(final_audio),
-                    "file_size": file_size,
-                    "temp_path": final_audio,
-                    "temp_dir": temp_dir,
-                    "combined": False
-                }
-            else:
-                file_size = os.path.getsize(temp_audio_raw)
-                return {
-                    "status": "success",
-                    "filename": os.path.basename(temp_audio_raw),
-                    "file_size": file_size,
-                    "temp_path": temp_audio_raw,
-                    "temp_dir": temp_dir,
-                    "combined": False
-                }
         if video_itag is None and audio_itag is None:
             # Fallback a 1080p por defecto si no hay itags en absoluto
             video_itag, audio_itag = 137, 140
 
-        temp_dir = tempfile.mkdtemp(prefix="yt_combined_", dir=self.base_temp_dir)
+        temp_dir = tempfile.mkdtemp(prefix="yt_proc_", dir=self.base_temp_dir)
         try:
-            logger.info(f"🎬 Iniciando combinación: {url}")
-            logger.info(f"🎯 Itags - Video: {video_itag}, Audio: {audio_itag}")
+            logger.info(f"🎬 Iniciando proceso YouTube: {url}")
+            logger.info(f"🎯 Parámetros - Video itag: {video_itag}, Audio itag: {audio_itag}, Formato: {format_type}")
 
-            # Nombres de archivos temporales
+            # Nombres de archivos temporales base
             temp_video = os.path.join(temp_dir, "video_temp.mp4")
-            # Si el itag es mp3-friendly, intentamos .mp3, si no .m4a
-            use_mp3 = audio_itag == 140 or audio_itag is None # 140 es m4a, pero forzaremos mp3 si se pide
-            temp_audio = os.path.join(temp_dir, "audio_temp.mp3" if use_mp3 else "audio_temp.m4a")
+            temp_audio_raw = os.path.join(temp_dir, f"audio_raw_{audio_itag}.m4a")
             
             # ✅ ESCENARIO 1: SOLO AUDIO
             if not video_itag and audio_itag:
                 logger.info(f"⬇️ Descargando SOLO AUDIO (itag {audio_itag})...")
-                await self._download_format_threaded(url, audio_itag, temp_audio, "audio", temp_dir)
-                file_size = os.path.getsize(temp_audio)
+                await self._download_format_threaded(url, audio_itag, temp_audio_raw, "audio", temp_dir)
+                
+                if format_type.lower() == "mp3":
+                    final_audio = os.path.join(temp_dir, f"audio_final_{audio_itag}_{int(time.time())}.mp3")
+                    await self._convert_to_mp3_threaded(temp_audio_raw, final_audio)
+                    if os.path.exists(temp_audio_raw): os.remove(temp_audio_raw)
+                    target_path = final_audio
+                else:
+                    target_path = temp_audio_raw
+                
+                file_size = os.path.getsize(target_path)
                 return {
                     "status": "success",
-                    "temp_path": temp_audio,
+                    "temp_path": target_path,
                     "temp_dir": temp_dir,
                     "file_size": file_size,
-                    "filename": os.path.basename(temp_audio),
+                    "filename": os.path.basename(target_path),
                     "combined": False
                 }
 
@@ -156,18 +128,32 @@ class YouTubeCombinerService:
                 }
 
             # ✅ ESCENARIO 3: COMBINACIÓN (VIDEO + AUDIO)
+            logger.info("⬇️ Descargando video y audio para combinación...")
             if not output_filename:
                 output_filename = f"youtube_combined_{video_itag}_{audio_itag}.mp4"
-            
             final_output = os.path.join(temp_dir, output_filename)
 
-            # Paso 1: Descargar video
-            logger.info("⬇️ Descargando video...")
+            # Descargar ambos
             await self._download_format_threaded(url, video_itag, temp_video, "video", temp_dir)
+            await self._download_format_threaded(url, audio_itag, temp_audio_raw, "audio", temp_dir)
             
-            # Paso 2: Descargar audio  
-            logger.info("⬇️ Descargando audio...")
-            await self._download_format_threaded(url, audio_itag, temp_audio, "audio", temp_dir)
+            # Combinar
+            logger.info("🎞️ Combinando con ffmpeg...")
+            await self._merge_video_audio_threaded(temp_video, temp_audio_raw, final_output)
+            
+            # Limpieza inmediata de partes
+            if os.path.exists(temp_video): os.remove(temp_video)
+            if os.path.exists(temp_audio_raw): os.remove(temp_audio_raw)
+            
+            file_size = os.path.getsize(final_output)
+            return {
+                "status": "success",
+                "temp_path": final_output,
+                "temp_dir": temp_dir,
+                "file_size": file_size,
+                "filename": output_filename,
+                "combined": True
+            }
             
             # Paso 3: Combinar con ffmpeg
             logger.info("🎞️ Combinando con ffmpeg...")
