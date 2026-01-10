@@ -43,17 +43,23 @@ async def combine_youtube_video_audio(request: CombineRequest):
             "1080p": (137, 140),
             "1440p": (271, 140),  # VP9 1440p
             "2160p": (313, 140),  # VP9 4K
-            "4k": (313, 140)
+            "4k": (313, 140),
+            "mp3": (None, 140),
+            "audio": (None, 140)
         }
         
-        # ✅ USAR ITAGS ESPECÍFICOS SI SE PROVEEN (INCLUSO SI SON NONE)
-        # Solo usamos el mapa de calidad si el frontend no envió itags específicos.
-        # Si envió al menos uno (incluso null), los respetamos.
         if request.video_itag is not None or "audio_itag" in request.dict(exclude_unset=True):
             video_itag = request.video_itag
             audio_itag = request.audio_itag
         else:
-            video_itag, audio_itag = quality_to_itag.get(request.quality, (137, 140))
+            # Si el format_type es mp3, forzamos calidad de solo audio
+            effective_quality = "mp3" if request.format_type == "mp3" else request.quality
+            video_itag, audio_itag = quality_to_itag.get(effective_quality, (137, 140))
+
+        # 🔥 SEGURIDAD EXTRA: Si el usuario quiere mp3, NUNCA descargar video
+        if request.format_type == "mp3" or request.quality in ["mp3", "audio"]:
+            video_itag = None
+            if not audio_itag: audio_itag = 140
 
         logger.info(f"🎯 Itags Finales Procesados - Video: {video_itag}, Audio: {audio_itag}")
         
