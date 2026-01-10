@@ -189,8 +189,8 @@ class YouTubeCombinerService:
             # Step 1: Descarga con yt-dlp con ROTACIÓN DE CLIENTES
             # Probamos diferentes clientes si uno falla o devuelve basura
             clients_to_try = [
-                "tv",       # El más robusto contra SABR
-                "ios",      # Frecuente pero requiere tokens a veces
+                "tv",       # El más robusto contra SABR y Tokens
+                "ios",      # Frecuente pero requiere tokens
                 "android",  # Fallback móvil
                 "mweb",     # Fallback web móvil
                 "web"       # Último recurso
@@ -210,15 +210,17 @@ class YouTubeCombinerService:
                     "yt-dlp",
                     "--no-playlist",
                     "-o", download_path,
-                    "--socket-timeout", "20",
-                    "--retries", "1",
+                    "--socket-timeout", "30",
+                    "--retries", "3",
                     "--no-check-certificate",
                     "--extractor-args", f"youtube:player-client={client}",
+                    "--remote-components", "ejs:github",  # ✅ CRÍTICO: Para resolver JS challenges
+                    "--cache-dir", "/app/cache/yt_dlp",   # ✅ COMPARTIR CACHÉ
                     "--no-part",
                     "-f", str(itag)
                 ]
                 
-                # Agregar cookies si existen (convertir Path a string)
+                # Agregar cookies si existen (convertir Path a string de forma segura)
                 cookies_path = str(settings.YOUTUBE_COOKIES_PATH) if hasattr(settings, 'YOUTUBE_COOKIES_PATH') else "/app/cookies/cookies.txt"
                 if os.path.exists(cookies_path) and os.path.getsize(cookies_path) > 100:
                     current_cmd.extend(["--cookiefile", cookies_path])
@@ -230,9 +232,9 @@ class YouTubeCombinerService:
                     
                     if os.path.exists(download_path):
                         file_size_raw = os.path.getsize(download_path)
-                        # Los audios/videos reales de Youtube suelen pesar > 50KB.
-                        # Si pesa menos, es probable que se haya descargado un error o basura.
-                        if file_size_raw > 50000: 
+                        # Verificación de tamaño según el tipo de formato
+                        min_size = 50000 if format_type == "video" else 10000 # 50KB vídeo, 10KB audio
+                        if file_size_raw > min_size: 
                             success = True
                             logger.info(f"✅ Descarga exitosa con cliente {client} ({file_size_raw} bytes)")
                             break
@@ -247,10 +249,30 @@ class YouTubeCombinerService:
                         except: pass
 
             if not success:
-                # Si falló todo, intentamos una descarga SIN itag (itag automático - mejor formato)
-                logger.warning("🚨 Fallaron itags específicos. Intentando descarga genérica...")
-                # ... Lógica simplificada para no extender el código excesivamente ...
-                raise SnapTubeError(f"No se pudo descargar {format_type} con ningún cliente. Último error: {last_error}")
+                # 🚨 FALLBACK EXTREMO: Si falló el itag específico, intentamos descarga genérica
+                logger.warning(f"🚨 Fallaron itags específicos ({itag}) con todos los clientes. Intentando descarga genérica...")
+                fallback_cmd = [
+                    "yt-dlp", "--no-playlist", 
+                    "-o", download_path,
+                    "--no-check-certificate",
+                    "--remote-components", "ejs:github",
+                    "-f", "bestaudio/best" if format_type == "audio" else "bestvideo/best",
+                    url
+                ]
+                if os.path.exists(cookies_path) and os.path.getsize(cookies_path) > 100:
+                    fallback_cmd.extend(["--cookiefile", cookies_path])
+                
+                try:
+                    await asyncio.to_thread(self._run_subprocess_sync, fallback_cmd, f"{format_type}_fallback")
+                    if os.path.exists(download_path) and os.path.getsize(download_path) > 5000:
+                        success = True
+                        logger.info(f"✨ Fallback exitoso para {format_type}")
+                except Exception as e:
+                    logger.error(f"❌ Falló incluso el fallback: {e}")
+                    raise SnapTubeError(f"No se pudo descargar {format_type} ni con fallback. Último error: {last_error}")
+
+            if not success:
+                raise SnapTubeError(f"No se pudo descargar {format_type} con ningún método. Último error: {last_error}")
 
             # Step 2: Fixup con FFmpeg para asegurar que el archivo sea reproducible (Re-muxing forzado)
             file_size_raw = os.path.getsize(download_path)
