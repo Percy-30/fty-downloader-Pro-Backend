@@ -112,8 +112,8 @@ class YouTubeCombinerService:
                     "temp_dir": temp_dir,
                     "combined": False
                 }
-        if not video_itag and not audio_itag:
-            # Fallback a 1080p por defecto si no hay itags
+        if video_itag is None and audio_itag is None:
+            # Fallback a 1080p por defecto si no hay itags en absoluto
             video_itag, audio_itag = 137, 140
 
         temp_dir = tempfile.mkdtemp(prefix="yt_combined_", dir=self.base_temp_dir)
