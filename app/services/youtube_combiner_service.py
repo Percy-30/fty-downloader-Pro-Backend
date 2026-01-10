@@ -62,6 +62,8 @@ class YouTubeCombinerService:
         url: str, 
         video_itag: Optional[int] = None,
         audio_itag: Optional[int] = None,
+        quality: str = "1080p",
+        format_type: str = "mp4",
         output_filename: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -72,7 +74,36 @@ class YouTubeCombinerService:
         if video_itag and not audio_itag:
             return await self.download_single(url, video_itag, output_filename, strip_audio=True)
         if audio_itag and not video_itag:
-            return await self.download_single(url, audio_itag, output_filename, strip_video=True)
+            # ✅ SOLO AUDIO: Descargar y opcionalmente convertir a MP3
+            temp_audio_raw = os.path.join(self.temp_dir, f"audio_raw_{audio_itag}.m4a")
+            await self._download_format_threaded(url, audio_itag, temp_audio_raw, "audio")
+            
+            if format_type.lower() == "mp3":
+                final_audio = os.path.join(self.temp_dir, f"audio_final_{audio_itag}_{int(asyncio.get_event_loop().time())}.mp3")
+                await self._convert_to_mp3_threaded(temp_audio_raw, final_audio)
+                # Limpiar el raw después de convertir
+                if os.path.exists(temp_audio_raw):
+                    os.remove(temp_audio_raw)
+                
+                file_size = os.path.getsize(final_audio)
+                return {
+                    "status": "success",
+                    "filename": os.path.basename(final_audio),
+                    "file_size": file_size,
+                    "temp_path": final_audio,
+                    "temp_dir": self.temp_dir,
+                    "combined": False
+                }
+            else:
+                file_size = os.path.getsize(temp_audio_raw)
+                return {
+                    "status": "success",
+                    "filename": os.path.basename(temp_audio_raw),
+                    "file_size": file_size,
+                    "temp_path": temp_audio_raw,
+                    "temp_dir": self.temp_dir,
+                    "combined": False
+                }
         if not video_itag and not audio_itag:
             # Fallback a 1080p por defecto si no hay itags
             video_itag, audio_itag = 137, 140
@@ -154,7 +185,7 @@ class YouTubeCombinerService:
                 "--socket-timeout", "30",
                 "--retries", "2",
                 "--remote-components", "ejs:github",
-                "--extractor-args", "youtube:player-client=ios,web,tv",
+                "--extractor-args", "youtube:player-client=tv,web,ios",
                 "--cache-dir", "/app/cache/yt_dlp",
             ]
             
@@ -203,6 +234,30 @@ class YouTubeCombinerService:
         except Exception as e:
             logger.error(f"❌ Error descargando {format_type}: {str(e)}")
             raise
+
+    async def _convert_to_mp3_threaded(self, input_path: str, output_path: str):
+        """Convierte audio a MP3 usando ffmpeg (threaded para Windows)"""
+        logger.info(f"🎵 Convirtiendo a MP3: {input_path} -> {output_path}")
+        
+        try:
+            cmd = [
+                "ffmpeg",
+                "-i", input_path,
+                "-vn",
+                "-ar", "44100",
+                "-ac", "2",
+                "-b:a", "192k",
+                "-y",
+                output_path
+            ]
+            
+            await asyncio.to_thread(
+                self._run_subprocess_sync, cmd, "ffmpeg_mp3"
+            )
+            logger.info("✅ Conversión a MP3 completada")
+        except Exception as e:
+            logger.error(f"❌ Error convirtiendo a MP3: {str(e)}")
+            raise SnapTubeError(f"Error en conversión MP3: {str(e)}")
 
     async def _merge_video_audio_threaded(self, video_path: str, audio_path: str, output_path: str):
         """Combina video + audio usando ffmpeg (threaded para Windows)"""

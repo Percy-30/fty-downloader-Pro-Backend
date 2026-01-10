@@ -19,6 +19,7 @@ class CombineRequest(BaseModel):
     video_itag: Optional[int] = None
     audio_itag: Optional[int] = None
     quality: Optional[str] = "1080p"
+    format_type: Optional[str] = "mp4"
 
 @router.post("/youtube/combine")
 async def combine_youtube_video_audio(request: CombineRequest):
@@ -57,7 +58,9 @@ async def combine_youtube_video_audio(request: CombineRequest):
         result = await youtube_combiner.download_and_combine(
             url=request.url,
             video_itag=video_itag,
-            audio_itag=audio_itag
+            audio_itag=audio_itag,
+            quality=request.quality,
+            format_type=request.format_type
         )
         
         # ✅ VERIFICAR RESULTADO
@@ -72,19 +75,18 @@ async def combine_youtube_video_audio(request: CombineRequest):
         is_video_only = video_itag and not audio_itag
         is_combined = video_itag and audio_itag
 
-        if is_audio_only:
-            media_type = "audio/mpeg" if "audio" in result.get("filename", "").lower() else "audio/mp4"
-            ext = "mp3" if "audio/mpeg" in media_type else "m4a"
+        if not video_itag and audio_itag:
+            media_type = "audio/mpeg" if "mp3" in result.get("filename", "").lower() else "audio/mp4"
+            ext = "mp3" if media_type == "audio/mpeg" else "m4a"
+            filename = f"youtube_audio_{audio_itag}_{int(asyncio.get_event_loop().time())}.{ext}"
+        elif video_itag and not audio_itag:
+            media_type = "video/mp4"
+            ext = request.format_type or "mp4"
+            filename = f"youtube_video_{video_itag}_{int(asyncio.get_event_loop().time())}.{ext}"
         else:
             media_type = "video/mp4"
             ext = "mp4"
-
-        # Re-construir filename si es necesario para asegurar extensión correcta
-        base_filename = result.get("filename", f"youtube_{request.quality}_{video_itag or audio_itag}")
-        if not base_filename.endswith(f".{ext}"):
-            base_filename = base_filename.rsplit('.', 1)[0] + f".{ext}"
-        
-        filename = base_filename.replace('"', '').replace("'", "")
+            filename = f"youtube_combined_{video_itag}_{audio_itag}_{int(asyncio.get_event_loop().time())}.{ext}"
         
         file_size = result.get("file_size", 0)
         logger.info(f"✅ Archivo listo para streaming: {file_size} bytes ({media_type})")
