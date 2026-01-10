@@ -192,7 +192,8 @@ class YouTubeCombinerService:
                 "--socket-timeout", "30",
                 "--retries", "5",
                 "--no-check-certificate",
-                "--extractor-args", "youtube:player-client=tv,web,android",
+                "--extractor-args", "youtube:player-client=tv,mweb",
+                "--no-part",
                 "--cache-dir", "/app/cache/yt_dlp",
                 "-f", str(itag)
             ]
@@ -207,18 +208,29 @@ class YouTubeCombinerService:
             # Step 1: Descarga con yt-dlp
             await asyncio.to_thread(self._run_subprocess_sync, cmd, format_type)
             
+            # VERIFICACIÓN RIGUROSA POST-DESCARGA
             if not os.path.exists(download_path):
-                raise SnapTubeError(f"Error: El archivo {format_type} no se descargó correctamente.")
-                
+                # Reintentar buscando si yt-dlp le puso extensión automática (ej: .m4a.raw.m4a)
+                possible_files = [f for f in os.listdir(temp_dir_path) if f.startswith(os.path.basename(download_path))]
+                if possible_files:
+                    download_path = os.path.join(temp_dir_path, possible_files[0])
+                    logger.info(f"🔍 Encontrado archivo alternativo: {download_path}")
+                else:
+                    raise SnapTubeError(f"Error: El archivo {format_type} no se descargó (no existe {download_path})")
+            
+            file_size_raw = os.path.getsize(download_path)
+            if file_size_raw < 1000: # Menos de 1KB es probablemente basura o error
+                raise SnapTubeError(f"Error: El archivo {format_type} está corrupto o vacío ({file_size_raw} bytes)")
+
             # Step 2: Fixup con FFmpeg para asegurar que el archivo sea reproducible
-            logger.info(f"🎞️ Corrigiendo contenedor/headers de {format_type}...")
+            logger.info(f"🎞️ Re-muxing de {format_type} para asegurar integridad ({file_size_raw} bytes)...")
             ffmpeg_cmd = ["ffmpeg", "-i", download_path, "-y"]
             
             if format_type == "audio":
                 if output_path.lower().endswith(".mp3"):
-                    ffmpeg_cmd.extend(["-codec:a", "libmp3lame", "-q:a", "2"])
+                    ffmpeg_cmd.extend(["-codec:a", "libmp3lame", "-q:a", "2", "-ar", "44100"])
                 else:
-                    ffmpeg_cmd.extend(["-codec:a", "copy"]) # Remux a m4a/mp4 limpio
+                    ffmpeg_cmd.extend(["-codec:a", "aac", "-b:a", "128k"]) # Forzar recode ligero para m4a
             else:
                 ffmpeg_cmd.extend(["-codec:v", "copy"])
                 if strip_audio:
@@ -232,6 +244,9 @@ class YouTubeCombinerService:
             if os.path.exists(download_path):
                 os.remove(download_path)
             
+            if not os.path.exists(output_path):
+                raise SnapTubeError(f"Error: FFmpeg no pudo generar el archivo final {format_type}")
+                
             file_size = os.path.getsize(output_path)
             logger.info(f"✅ {format_type.capitalize()} verificado y listo: {file_size} bytes")
 
