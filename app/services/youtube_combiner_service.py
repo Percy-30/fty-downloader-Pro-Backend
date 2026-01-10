@@ -192,16 +192,16 @@ class YouTubeCombinerService:
                 "--socket-timeout", "30",
                 "--retries", "5",
                 "--no-check-certificate",
-                "--extractor-args", "youtube:player-client=tv,mweb",
+                "--extractor-args", "youtube:player-client=android,tv",
                 "--no-part",
                 "--cache-dir", "/app/cache/yt_dlp",
                 "-f", str(itag)
             ]
             
-            # ✅ AGREGAR COOKIES SI EXISTEN
             cookies_path = settings.YOUTUBE_COOKIES_PATH if hasattr(settings, 'YOUTUBE_COOKIES_PATH') else "/app/cookies/cookies.txt"
             if os.path.exists(cookies_path) and os.path.getsize(cookies_path) > 10:
-                cmd.extend(["--cookiefile", cookies_path])
+                cmd.extend(["--cookiefile", str(cookies_path)])
+                logger.info("🍪 Usando archivo de cookies en combinador")
 
             cmd.append(url)
             
@@ -227,10 +227,11 @@ class YouTubeCombinerService:
             ffmpeg_cmd = ["ffmpeg", "-i", download_path, "-y"]
             
             if format_type == "audio":
+                ffmpeg_cmd.append("-vn") # ✅ EXPLICITAMENTE SIN VIDEO PARA AUDIO
                 if output_path.lower().endswith(".mp3"):
                     ffmpeg_cmd.extend(["-codec:a", "libmp3lame", "-q:a", "2", "-ar", "44100"])
                 else:
-                    ffmpeg_cmd.extend(["-codec:a", "aac", "-b:a", "128k"]) # Forzar recode ligero para m4a
+                    ffmpeg_cmd.extend(["-codec:a", "aac", "-b:a", "192k"]) # ✅ MEJOR BITRATE PARA AAC
             else:
                 ffmpeg_cmd.extend(["-codec:v", "copy"])
                 if strip_audio:
