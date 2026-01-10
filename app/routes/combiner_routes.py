@@ -7,6 +7,9 @@ from typing import Optional
 import base64
 import os
 import shutil
+import time  # ✅ AGREGADO
+import asyncio
+from app.config import settings  # ✅ AGREGADO
 import asyncio  # ✅ AGREGADO
 import time
 from app.config import settings  # ✅ AGREGADO
@@ -113,14 +116,10 @@ async def combine_youtube_video_audio(request: CombineRequest):
             file_stream(),
             media_type=media_type,
             headers={
-                "Content-Disposition": f"attachment; filename=\"{filename}\"",
+                "Content-Disposition": f'attachment; filename="{filename}"',
                 "Content-Length": str(file_size),
                 "X-File-Size": str(file_size),
-                "X-Video-Itag": str(video_itag or ""),
-                "X-Audio-Itag": str(audio_itag or ""),
-                "X-Is-Audio": "true" if is_audio_only else "false",
-                "X-Is-Video": "false" if is_audio_only else "true",
-                "Access-Control-Expose-Headers": "Content-Disposition, Content-Length, X-File-Size, X-Video-Itag, X-Audio-Itag, X-Is-Audio, X-Is-Video"
+                "Access-Control-Expose-Headers": "Content-Disposition, Content-Length, X-File-Size"
             }
         )
         

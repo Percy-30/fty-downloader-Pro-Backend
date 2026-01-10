@@ -192,7 +192,7 @@ class YouTubeCombinerService:
                 "--socket-timeout", "30",
                 "--retries", "5",
                 "--no-check-certificate",
-                "--extractor-args", "youtube:player-client=android,tv",
+                "--extractor-args", "youtube:player-client=tv",
                 "--no-part",
                 "--cache-dir", "/app/cache/yt_dlp",
                 "-f", str(itag)
@@ -227,11 +227,11 @@ class YouTubeCombinerService:
             ffmpeg_cmd = ["ffmpeg", "-i", download_path, "-y"]
             
             if format_type == "audio":
-                ffmpeg_cmd.append("-vn") # ✅ EXPLICITAMENTE SIN VIDEO PARA AUDIO
+                ffmpeg_cmd.append("-vn") # ✅ ELIMINAR CUALQUIER TRAZA DE VIDEO
                 if output_path.lower().endswith(".mp3"):
-                    ffmpeg_cmd.extend(["-codec:a", "libmp3lame", "-q:a", "2", "-ar", "44100"])
+                    ffmpeg_cmd.extend(["-codec:a", "libmp3lame", "-q:a", "2", "-ar", "44100", "-ac", "2"])
                 else:
-                    ffmpeg_cmd.extend(["-codec:a", "aac", "-b:a", "192k"]) # ✅ MEJOR BITRATE PARA AAC
+                    ffmpeg_cmd.extend(["-codec:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2"])
             else:
                 ffmpeg_cmd.extend(["-codec:v", "copy"])
                 if strip_audio:
