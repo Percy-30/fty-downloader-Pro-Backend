@@ -10,6 +10,8 @@ import sys
 
 logger = logging.getLogger(__name__)
 
+from app.config import settings
+
 class SnapTubeError(Exception):
     pass
 
@@ -190,7 +192,7 @@ class YouTubeCombinerService:
                 "--socket-timeout", "30",
                 "--retries", "5",
                 "--no-check-certificate",
-                "--extractor-args", "youtube:player-client=web,tv,android",
+                "--extractor-args", "youtube:player-client=tv,web,android",
                 "--cache-dir", "/app/cache/yt_dlp",
                 "-f", str(itag)
             ]
