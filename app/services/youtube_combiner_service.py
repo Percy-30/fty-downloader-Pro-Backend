@@ -90,15 +90,19 @@ class YouTubeCombinerService:
             temp_video = os.path.join(temp_dir, "video_temp.mp4")
             temp_audio_raw = os.path.join(temp_dir, f"audio_raw_{audio_itag}.m4a")
             
-            # ✅ ESCENARIO 1: SOLO AUDIO
+            # ✅ ESCENARIO 1: SOLO AUDIO (MP3/M4A)
             if not video_itag and audio_itag:
-                logger.info(f"⬇️ Descargando SOLO AUDIO (itag {audio_itag})...")
+                logger.info(f"⬇️ MODO SOLO AUDIO: itag {audio_itag} -> {format_type}")
                 await self._download_format_threaded(url, audio_itag, temp_audio_raw, "audio", temp_dir)
                 
+                # Tal como solicitó el usuario: Descargar -> Transformar -> Entregar -> Limpiar
                 if format_type.lower() == "mp3":
-                    final_audio = os.path.join(temp_dir, f"audio_final_{audio_itag}_{int(time.time())}.mp3")
+                    final_audio = os.path.join(temp_dir, f"audio_final_{int(time.time())}.mp3")
+                    logger.info(f"🎼 Transformando temporalmente a MP3 de alta fidelidad...")
                     await self._convert_to_mp3_threaded(temp_audio_raw, final_audio)
-                    if os.path.exists(temp_audio_raw): os.remove(temp_audio_raw)
+                    if os.path.exists(temp_audio_raw): 
+                        os.remove(temp_audio_raw)
+                        logger.info("🧹 Eliminando rastro del audio original (.m4a)")
                     target_path = final_audio
                 else:
                     target_path = temp_audio_raw
@@ -154,12 +158,6 @@ class YouTubeCombinerService:
                 "filename": output_filename,
                 "combined": True
             }
-            
-            # Paso 3: Combinar con ffmpeg
-            logger.info("🎞️ Combinando con ffmpeg...")
-            await self._merge_video_audio_threaded(temp_video, temp_audio, final_output)
-
-            # ✅ LIMPIEZA INMEDIATA: Borrar partes separadas una vez unido
             try:
                 if os.path.exists(temp_video):
                     os.remove(temp_video)
@@ -314,25 +312,16 @@ class YouTubeCombinerService:
             
             await asyncio.to_thread(self._run_subprocess_sync, ffmpeg_cmd, f"ffmpeg_fix_{format_type}")
             
-            # Limpiar archivo temporal crudo
+            # Limpiar archivo temporal crudo (.raw)
             if os.path.exists(download_path):
-                os.remove(download_path)
+                try: os.remove(download_path)
+                except: pass
             
             if not os.path.exists(output_path):
                 raise SnapTubeError(f"Error: FFmpeg no pudo procesar el archivo final de {format_type}")
                 
             file_size_final = os.path.getsize(output_path)
-            logger.info(f"✅ {format_type.capitalize()} listo para el usuario: {file_size_final} bytes")
-            
-            # Limpiar archivo raw temporal
-            if os.path.exists(download_path):
-                os.remove(download_path)
-            
-            if not os.path.exists(output_path):
-                raise SnapTubeError(f"Error: FFmpeg no pudo generar el archivo final {format_type}")
-                
-            file_size = os.path.getsize(output_path)
-            logger.info(f"✅ {format_type.capitalize()} verificado y listo: {file_size} bytes")
+            logger.info(f"✅ {format_type.capitalize()} listo ({file_size_final} bytes)")
 
         except Exception as e:
             logger.error(f"❌ Error procesando {format_type}: {str(e)}")

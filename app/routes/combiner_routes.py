@@ -56,12 +56,16 @@ async def combine_youtube_video_audio(request: CombineRequest):
             effective_quality = "mp3" if request.format_type == "mp3" else request.quality
             video_itag, audio_itag = quality_to_itag.get(effective_quality, (137, 140))
 
-        # 🔥 SEGURIDAD TOTAL: Si el usuario quiere mp3 o audio, INVALIDAR cualquier itag de video
-        if request.format_type in ["mp3", "audio"] or request.quality in ["mp3", "audio"]:
-            logger.info("强制音频模式: 丢弃视频 iTAG.")
+        # 🔥 SEGURIDAD TOTAL: Si el usuario pide MP3, forzar modo de solo audio e invalidar video
+        f_type = str(request.format_type or "").lower()
+        q_type = str(request.quality or "").lower()
+        
+        if f_type in ["mp3", "audio"] or q_type in ["mp3", "audio"]:
+            logger.info(f"🚫 MODO AUDIO DETECTADO: Descartando video itag ({video_itag}) para entregar solo Audio.")
             video_itag = None
+            # Si no hay itag de audio, tratar de obtener el mejor disponible (140 suele ser m4a)
             if not audio_itag: 
-                audio_itag = 140 # Default audio M4A
+                audio_itag = 140
 
         logger.info(f"🎯 Itags Finales Procesados - Video: {video_itag}, Audio: {audio_itag}")
         
