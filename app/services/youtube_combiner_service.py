@@ -176,70 +176,68 @@ class YouTubeCombinerService:
             raise SnapTubeError(f"Error combinando video y audio: {str(e)}")
 
     async def _download_format_threaded(self, url: str, itag: int, output_path: str, format_type: str, temp_dir_path: str, strip_audio: bool = False, strip_video: bool = False):
-        """Descarga un formato específico usando yt-dlp (threaded para Windows)"""
-        logger.info(f"⬇️ Descargando {format_type} (itag {itag}) - Strip A: {strip_audio}, V: {strip_video}")
+        """Descarga un formato específico usando yt-dlp con fixup de FFmpeg post-descarga"""
+        logger.info(f"⬇️ Descargando {format_type} (itag {itag}) - Arreglo FFmpeg activado")
         
         try:
-            # Archivo de descarga inicial
-            download_path = output_path
-            if strip_audio or strip_video:
-                download_path = output_path + ".raw"
+            # Archivo de descarga inicial (siempre procesado después)
+            download_path = output_path + ".raw"
 
             cmd = [
                 "yt-dlp",
                 "--no-playlist",
                 "-o", download_path,
                 "--socket-timeout", "30",
-                "--retries", "2",
-                "--remote-components", "ejs:github",
-                "--extractor-args", "youtube:player-client=android,web,tv",
+                "--retries", "5",
+                "--no-check-certificate",
+                "--extractor-args", "youtube:player-client=web,tv,android",
                 "--cache-dir", "/app/cache/yt_dlp",
+                "-f", str(itag)
             ]
             
-            # Forzar itag exacto para máxima precisión
-            cmd.extend(["-f", str(itag)])
-            
             # ✅ AGREGAR COOKIES SI EXISTEN
-            cookies_path = "/app/cookies/cookies.txt"
+            cookies_path = settings.YOUTUBE_COOKIES_PATH if hasattr(settings, 'YOUTUBE_COOKIES_PATH') else "/app/cookies/cookies.txt"
             if os.path.exists(cookies_path) and os.path.getsize(cookies_path) > 10:
                 cmd.extend(["--cookiefile", cookies_path])
-                logger.info("🍪 Usando archivo de cookies en combinador")
 
             cmd.append(url)
             
-            logger.info(f"🔧 Ejecutando comando: {' '.join(cmd)}")
-            
-            # ✅ SOLUCIÓN: Usar asyncio.to_thread para evitar problemas de subprocess en Windows
-            result = await asyncio.to_thread(
-                self._run_subprocess_sync, cmd, format_type
-            )
+            # Step 1: Descarga con yt-dlp
+            await asyncio.to_thread(self._run_subprocess_sync, cmd, format_type)
             
             if not os.path.exists(download_path):
-                raise SnapTubeError(f"Archivo {format_type} no se creó: {download_path}")
+                raise SnapTubeError(f"Error: El archivo {format_type} no se descargó correctamente.")
                 
-            # ✅ PROCESAMIENTO POST-DESCARGA (Strips)
-            if strip_audio or strip_video:
-                logger.info(f"🎞️ Aplicando stripping a {format_type}...")
-                ffmpeg_cmd = ["ffmpeg", "-i", download_path, "-y"]
+            # Step 2: Fixup con FFmpeg para asegurar que el archivo sea reproducible
+            logger.info(f"🎞️ Corrigiendo contenedor/headers de {format_type}...")
+            ffmpeg_cmd = ["ffmpeg", "-i", download_path, "-y"]
+            
+            if format_type == "audio":
+                if output_path.lower().endswith(".mp3"):
+                    ffmpeg_cmd.extend(["-codec:a", "libmp3lame", "-q:a", "2"])
+                else:
+                    ffmpeg_cmd.extend(["-codec:a", "copy"]) # Remux a m4a/mp4 limpio
+            else:
+                ffmpeg_cmd.extend(["-codec:v", "copy"])
                 if strip_audio:
-                    ffmpeg_cmd.extend(["-an"])
-                if strip_video:
-                    ffmpeg_cmd.extend(["-vn"])
-                
-                # Para audio y video solo, intentamos copiar códec para velocidad
-                ffmpeg_cmd.extend(["-c", "copy", output_path])
-                
-                await asyncio.to_thread(self._run_subprocess_sync, ffmpeg_cmd, "ffmpeg_strip")
-                
-                # Limpiar archivo raw
-                if os.path.exists(download_path):
-                    os.remove(download_path)
+                    ffmpeg_cmd.append("-an")
+            
+            ffmpeg_cmd.append(output_path)
+            
+            await asyncio.to_thread(self._run_subprocess_sync, ffmpeg_cmd, f"ffmpeg_fix_{format_type}")
+            
+            # Limpiar archivo raw temporal
+            if os.path.exists(download_path):
+                os.remove(download_path)
             
             file_size = os.path.getsize(output_path)
-            logger.info(f"✅ {format_type.capitalize()} listo: {file_size} bytes")
+            logger.info(f"✅ {format_type.capitalize()} verificado y listo: {file_size} bytes")
 
         except Exception as e:
-            logger.error(f"❌ Error descargando {format_type}: {str(e)}")
+            logger.error(f"❌ Error procesando {format_type}: {str(e)}")
+            if os.path.exists(download_path):
+                try: os.remove(download_path)
+                except: pass
             raise
 
     async def _convert_to_mp3_threaded(self, input_path: str, output_path: str):

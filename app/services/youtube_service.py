@@ -87,7 +87,7 @@ class YouTubeExtractor(BaseExtractor):
                 "remote_components": ["ejs:github"],
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["android", "web", "tv"]
+                        "player_client": ["web", "tv", "android"]
                     }
                 },
                 "cachedir": "/app/cache/yt_dlp",
