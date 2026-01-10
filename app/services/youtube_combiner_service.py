@@ -123,14 +123,44 @@ class YouTubeCombinerService:
 
             # Nombres de archivos temporales
             temp_video = os.path.join(temp_dir, "video_temp.mp4")
-            temp_audio = os.path.join(temp_dir, "audio_temp.m4a")
+            # Si el itag es mp3-friendly, intentamos .mp3, si no .m4a
+            use_mp3 = audio_itag == 140 or audio_itag is None # 140 es m4a, pero forzaremos mp3 si se pide
+            temp_audio = os.path.join(temp_dir, "audio_temp.mp3" if use_mp3 else "audio_temp.m4a")
             
+            # ✅ ESCENARIO 1: SOLO AUDIO
+            if not video_itag and audio_itag:
+                logger.info(f"⬇️ Descargando SOLO AUDIO (itag {audio_itag})...")
+                await self._download_format_threaded(url, audio_itag, temp_audio, "audio", temp_dir)
+                file_size = os.path.getsize(temp_audio)
+                return {
+                    "status": "success",
+                    "temp_path": temp_audio,
+                    "temp_dir": temp_dir,
+                    "file_size": file_size,
+                    "filename": os.path.basename(temp_audio),
+                    "combined": False
+                }
+
+            # ✅ ESCENARIO 2: SOLO VIDEO
+            if video_itag and not audio_itag:
+                logger.info(f"⬇️ Descargando SOLO VIDEO (itag {video_itag})...")
+                await self._download_format_threaded(url, video_itag, temp_video, "video", temp_dir, strip_audio=True)
+                file_size = os.path.getsize(temp_video)
+                return {
+                    "status": "success",
+                    "temp_path": temp_video,
+                    "temp_dir": temp_dir,
+                    "file_size": file_size,
+                    "filename": os.path.basename(temp_video),
+                    "combined": False
+                }
+
+            # ✅ ESCENARIO 3: COMBINACIÓN (VIDEO + AUDIO)
             if not output_filename:
                 output_filename = f"youtube_combined_{video_itag}_{audio_itag}.mp4"
             
             final_output = os.path.join(temp_dir, output_filename)
 
-            # ✅ SOLUCIÓN PARA WINDOWS: Usar asyncio.to_thread para subprocess
             # Paso 1: Descargar video
             logger.info("⬇️ Descargando video...")
             await self._download_format_threaded(url, video_itag, temp_video, "video", temp_dir)
