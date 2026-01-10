@@ -15,8 +15,9 @@ class SnapTubeError(Exception):
 
 class YouTubeCombinerService:
     def __init__(self):
-        self.temp_dir = tempfile.mkdtemp(prefix="yt_combiner_")
-        logger.info(f"📁 Directorio temporal creado: {self.temp_dir}")
+        # Directorio base para todos los temporales del combinador
+        self.base_temp_dir = tempfile.gettempdir()
+        logger.info("⚙️ YouTubeCombinerService inicializado")
 
     async def download_single(
         self,
@@ -29,16 +30,17 @@ class YouTubeCombinerService:
         """
         Descarga un solo formato (video o audio) de forma segura (PROXIED)
         """
+        temp_dir = tempfile.mkdtemp(prefix="yt_single_", dir=self.base_temp_dir)
         try:
             logger.info(f"📥 Descarga simple solicitada: {url} (itag {itag})")
             
             if not output_filename:
                 output_filename = f"youtube_single_{itag}_{int(asyncio.get_event_loop().time())}.mp4"
             
-            output_path = os.path.join(self.temp_dir, output_filename)
+            output_path = os.path.join(temp_dir, output_filename)
             
             # Paso único: Descargar formato
-            await self._download_format_threaded(url, itag, output_path, "single", strip_audio=strip_audio, strip_video=strip_video)
+            await self._download_format_threaded(url, itag, output_path, "single", temp_dir, strip_audio=strip_audio, strip_video=strip_video)
             
             if not os.path.exists(output_path):
                 raise SnapTubeError("No se pudo descargar el archivo")
@@ -50,11 +52,13 @@ class YouTubeCombinerService:
                 "filename": output_filename,
                 "file_size": file_size,
                 "temp_path": output_path,
-                "temp_dir": self.temp_dir,
+                "temp_dir": temp_dir,
                 "combined": False
             }
         except Exception as e:
             logger.error(f"❌ Error en descarga simple: {str(e)}")
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
             raise SnapTubeError(f"Error descargando formato: {str(e)}")
 
     async def download_and_combine(
@@ -75,11 +79,12 @@ class YouTubeCombinerService:
             return await self.download_single(url, video_itag, output_filename, strip_audio=True)
         if audio_itag and not video_itag:
             # ✅ SOLO AUDIO: Descargar y opcionalmente convertir a MP3
-            temp_audio_raw = os.path.join(self.temp_dir, f"audio_raw_{audio_itag}.m4a")
-            await self._download_format_threaded(url, audio_itag, temp_audio_raw, "audio")
+            temp_dir = tempfile.mkdtemp(prefix="yt_audio_", dir=self.base_temp_dir)
+            temp_audio_raw = os.path.join(temp_dir, f"audio_raw_{audio_itag}.m4a")
+            await self._download_format_threaded(url, audio_itag, temp_audio_raw, "audio", temp_dir)
             
             if format_type.lower() == "mp3":
-                final_audio = os.path.join(self.temp_dir, f"audio_final_{audio_itag}_{int(asyncio.get_event_loop().time())}.mp3")
+                final_audio = os.path.join(temp_dir, f"audio_final_{audio_itag}_{int(asyncio.get_event_loop().time())}.mp3")
                 await self._convert_to_mp3_threaded(temp_audio_raw, final_audio)
                 # Limpiar el raw después de convertir
                 if os.path.exists(temp_audio_raw):
@@ -91,7 +96,7 @@ class YouTubeCombinerService:
                     "filename": os.path.basename(final_audio),
                     "file_size": file_size,
                     "temp_path": final_audio,
-                    "temp_dir": self.temp_dir,
+                    "temp_dir": temp_dir,
                     "combined": False
                 }
             else:
@@ -101,34 +106,35 @@ class YouTubeCombinerService:
                     "filename": os.path.basename(temp_audio_raw),
                     "file_size": file_size,
                     "temp_path": temp_audio_raw,
-                    "temp_dir": self.temp_dir,
+                    "temp_dir": temp_dir,
                     "combined": False
                 }
         if not video_itag and not audio_itag:
             # Fallback a 1080p por defecto si no hay itags
             video_itag, audio_itag = 137, 140
 
+        temp_dir = tempfile.mkdtemp(prefix="yt_combined_", dir=self.base_temp_dir)
         try:
             logger.info(f"🎬 Iniciando combinación: {url}")
             logger.info(f"🎯 Itags - Video: {video_itag}, Audio: {audio_itag}")
 
             # Nombres de archivos temporales
-            temp_video = os.path.join(self.temp_dir, "video_temp.mp4")
-            temp_audio = os.path.join(self.temp_dir, "audio_temp.m4a")
+            temp_video = os.path.join(temp_dir, "video_temp.mp4")
+            temp_audio = os.path.join(temp_dir, "audio_temp.m4a")
             
             if not output_filename:
                 output_filename = f"youtube_combined_{video_itag}_{audio_itag}.mp4"
             
-            final_output = os.path.join(self.temp_dir, output_filename)
+            final_output = os.path.join(temp_dir, output_filename)
 
             # ✅ SOLUCIÓN PARA WINDOWS: Usar asyncio.to_thread para subprocess
             # Paso 1: Descargar video
             logger.info("⬇️ Descargando video...")
-            await self._download_format_threaded(url, video_itag, temp_video, "video")
+            await self._download_format_threaded(url, video_itag, temp_video, "video", temp_dir)
             
             # Paso 2: Descargar audio  
             logger.info("⬇️ Descargando audio...")
-            await self._download_format_threaded(url, audio_itag, temp_audio, "audio")
+            await self._download_format_threaded(url, audio_itag, temp_audio, "audio", temp_dir)
             
             # Paso 3: Combinar con ffmpeg
             logger.info("🎞️ Combinando con ffmpeg...")
@@ -159,16 +165,17 @@ class YouTubeCombinerService:
                 "video_itag": video_itag,
                 "audio_itag": audio_itag,
                 "temp_path": final_output,
-                "temp_dir": self.temp_dir,  # ✅ NUEVO: Para limpieza controlada
+                "temp_dir": temp_dir,
                 "combined": True
             }
 
         except Exception as e:
             logger.error(f"❌ Error en combinación: {str(e)}")
-            self._cleanup_temp_files()
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
             raise SnapTubeError(f"Error combinando video y audio: {str(e)}")
 
-    async def _download_format_threaded(self, url: str, itag: int, output_path: str, format_type: str, strip_audio: bool = False, strip_video: bool = False):
+    async def _download_format_threaded(self, url: str, itag: int, output_path: str, format_type: str, temp_dir_path: str, strip_audio: bool = False, strip_video: bool = False):
         """Descarga un formato específico usando yt-dlp (threaded para Windows)"""
         logger.info(f"⬇️ Descargando {format_type} (itag {itag}) - Strip A: {strip_audio}, V: {strip_video}")
         
@@ -185,7 +192,7 @@ class YouTubeCombinerService:
                 "--socket-timeout", "30",
                 "--retries", "2",
                 "--remote-components", "ejs:github",
-                "--extractor-args", "youtube:player-client=tv,web,ios",
+                "--extractor-args", "youtube:player-client=web,tv,mweb",
                 "--cache-dir", "/app/cache/yt_dlp",
             ]
             
@@ -318,13 +325,8 @@ class YouTubeCombinerService:
             raise
 
     def _cleanup_temp_files(self):
-        """Limpia archivos temporales"""
-        try:
-            if os.path.exists(self.temp_dir):
-                shutil.rmtree(self.temp_dir)
-                logger.info(f"🧹 Directorio temporal limpiado: {self.temp_dir}")
-        except Exception as e:
-            logger.warning(f"⚠️ Error limpiando temporales: {e}")
+        """Limpia archivos temporales antiguos (opcional, ya se limpian en las rutas)"""
+        pass
 
     async def get_available_itags(self, url: str) -> Dict[str, Any]:
         """
