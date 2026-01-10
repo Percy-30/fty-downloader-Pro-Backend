@@ -7,12 +7,9 @@ from typing import Optional
 import base64
 import os
 import shutil
-import time  # ✅ AGREGADO
-import asyncio
-from app.config import settings  # ✅ AGREGADO
-import asyncio  # ✅ AGREGADO
 import time
-from app.config import settings  # ✅ AGREGADO
+import asyncio
+from app.config import settings
 
 from app.services.youtube_combiner_service import youtube_combiner
 from app.services.base_extractor import SnapTubeError

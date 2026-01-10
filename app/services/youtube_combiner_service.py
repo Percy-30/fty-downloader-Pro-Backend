@@ -192,7 +192,7 @@ class YouTubeCombinerService:
                 "--socket-timeout", "30",
                 "--retries", "5",
                 "--no-check-certificate",
-                "--extractor-args", "youtube:player-client=tv",
+                "--extractor-args", "youtube:player-client=tv,web,android",
                 "--no-part",
                 "--cache-dir", "/app/cache/yt_dlp",
                 "-f", str(itag)
