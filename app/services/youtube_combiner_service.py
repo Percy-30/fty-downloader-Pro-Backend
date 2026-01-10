@@ -192,7 +192,7 @@ class YouTubeCombinerService:
                 "--socket-timeout", "30",
                 "--retries", "5",
                 "--no-check-certificate",
-                "--extractor-args", "youtube:player-client=tv,web,android",
+                "--extractor-args", "youtube:player-client=tv,android",
                 "--no-part",
                 "--cache-dir", "/app/cache/yt_dlp",
                 "-f", str(itag)
@@ -205,35 +205,52 @@ class YouTubeCombinerService:
 
             cmd.append(url)
             
-            # Step 1: Descarga con yt-dlp
-            await asyncio.to_thread(self._run_subprocess_sync, cmd, format_type)
-            
-            # VERIFICACIÓN RIGUROSA POST-DESCARGA
-            if not os.path.exists(download_path):
-                # Reintentar buscando si yt-dlp le puso extensión automática (ej: .m4a.raw.m4a)
-                possible_files = [f for f in os.listdir(temp_dir_path) if f.startswith(os.path.basename(download_path))]
-                if possible_files:
-                    download_path = os.path.join(temp_dir_path, possible_files[0])
-                    logger.info(f"🔍 Encontrado archivo alternativo: {download_path}")
-                else:
-                    raise SnapTubeError(f"Error: El archivo {format_type} no se descargó (no existe {download_path})")
-            
-            file_size_raw = os.path.getsize(download_path)
-            if file_size_raw < 1000: # Menos de 1KB es probablemente basura o error
-                raise SnapTubeError(f"Error: El archivo {format_type} está corrupto o vacío ({file_size_raw} bytes)")
+            # Step 1: Descarga con yt-dlp (Intento 1 con el cliente preferido)
+            clients_to_try = ["tv", "web", "android"]
+            success = False
+            last_error = ""
+
+            for client in clients_to_try:
+                logger.info(f"🔄 Intentando descargar {format_type} itag {itag} con cliente: {client}...")
+                current_cmd = cmd.copy()
+                # Actualizar el cliente en los extractor-args
+                for i, arg in enumerate(current_cmd):
+                    if "player-client=" in arg:
+                        current_cmd[i] = f"youtube:player-client={client}"
+                
+                try:
+                    await asyncio.to_thread(self._run_subprocess_sync, current_cmd, f"{format_type}_{client}")
+                    
+                    if os.path.exists(download_path):
+                        file_size_raw = os.path.getsize(download_path)
+                        if file_size_raw > 5000: # Si es mayor a 5KB, lo consideramos válido inicialmente
+                            success = True
+                            logger.info(f"✅ Descarga exitosa con cliente {client} ({file_size_raw} bytes)")
+                            break
+                        else:
+                            logger.warning(f"⚠️ Archivo demasiado pequeño ({file_size_raw} bytes) con cliente {client}. Reintentando...")
+                            if os.path.exists(download_path): os.remove(download_path)
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning(f"⚠️ Error con cliente {client}: {last_error}")
+                    if os.path.exists(download_path): os.remove(download_path)
+
+            if not success:
+                raise SnapTubeError(f"No se pudo descargar {format_type} con ningún cliente disponible. Último error: {last_error}")
 
             # Step 2: Fixup con FFmpeg para asegurar que el archivo sea reproducible
+            file_size_raw = os.path.getsize(download_path)
             logger.info(f"🎞️ Re-muxing de {format_type} para asegurar integridad ({file_size_raw} bytes)...")
             ffmpeg_cmd = ["ffmpeg", "-i", download_path, "-y"]
             
             if format_type == "audio":
-                ffmpeg_cmd.append("-vn") # ✅ ELIMINAR CUALQUIER TRAZA DE VIDEO
+                ffmpeg_cmd.append("-vn")
                 if output_path.lower().endswith(".mp3"):
-                    ffmpeg_cmd.extend(["-codec:a", "libmp3lame", "-q:a", "2", "-ar", "44100", "-ac", "2"])
+                    ffmpeg_cmd.extend(["-codec:a", "libmp3lame", "-q:a", "2", "-ar", "44100", "-ac", "2", "-id3v2_version", "3"])
                 else:
-                    ffmpeg_cmd.extend(["-codec:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2"])
+                    ffmpeg_cmd.extend(["-codec:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2", "-movflags", "+faststart"])
             else:
-                ffmpeg_cmd.extend(["-codec:v", "copy"])
+                ffmpeg_cmd.extend(["-codec:v", "copy", "-movflags", "+faststart"])
                 if strip_audio:
                     ffmpeg_cmd.append("-an")
             
