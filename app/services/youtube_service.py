@@ -20,8 +20,11 @@ class YouTubeExtractor(BaseExtractor):
     """Extractor de YouTube que COMBINA automáticamente video + audio"""
 
     def __init__(self, cookies_file: Optional[str] = None):
-        # ✅ Intentar usar cookies de la carpeta del servidor si no se proveen
-        self._cookies_file = cookies_file or "/app/cookies/cookies.txt"
+        # ✅ Ruta dinámica que funciona en Local y en Docker
+        base_dir = Path(__file__).resolve().parent.parent
+        default_cookies = str(base_dir / "cookies" / "cookies.txt")
+        self._cookies_file = cookies_file or default_cookies
+
         self._temp_dir = tempfile.mkdtemp(prefix="snaptube_")
         super().__init__()
 
@@ -87,11 +90,13 @@ class YouTubeExtractor(BaseExtractor):
                 "remote_components": ["ejs:github"],
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["tv", "android", "web"]
+                        "player_client": ["tv", "android", "web"],
+                        "skip": ["dash", "hls"] 
                     }
                 },
-                "cachedir": "/app/cache/yt_dlp",
+                "cachedir": str(base_dir / "cache" / "yt_dlp"),
             }
+
 
             cookies_file_path = self._ensure_cookies()
             if cookies_file_path:
