@@ -21,8 +21,8 @@ class YouTubeExtractor(BaseExtractor):
 
     def __init__(self, cookies_file: Optional[str] = None):
         # ✅ Ruta dinámica que funciona en Local y en Docker
-        base_dir = Path(__file__).resolve().parent.parent
-        default_cookies = str(base_dir / "cookies" / "cookies.txt")
+        self.base_dir = Path(__file__).resolve().parent.parent
+        default_cookies = str(self.base_dir / "cookies" / "cookies.txt")
         self._cookies_file = cookies_file or default_cookies
 
         self._temp_dir = tempfile.mkdtemp(prefix="snaptube_")
@@ -94,7 +94,7 @@ class YouTubeExtractor(BaseExtractor):
                         "skip": ["dash", "hls"] 
                     }
                 },
-                "cachedir": str(base_dir / "cache" / "yt_dlp"),
+                "cachedir": str(self.base_dir / "cache" / "yt_dlp"),
             }
 
 
